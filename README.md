@@ -16,6 +16,16 @@ The player is treated as a remote consciousness rather than a permanently attach
 - When the assembled-body pool is exhausted, the prototype switches to a small temporary recovery-bot body.
 - The foundation is ready for the later base system: land base or orbital/space base, component scarcity, fabrication time, deliberate body swapping, and recovery/deployment sequences.
 
+## DG-0005 fixes
+
+- HP no longer depends solely on the currently selected hitbox, so it cannot stall at a body-part boundary.
+- Every successful enemy hit now applies localized part damage plus a small chassis-integrity hit.
+- Chassis integrity is reset with each new body.
+- Aim pitch is reset with each new body.
+- Vertical aiming is clamped to a practical combat range instead of allowing the beam to point almost straight down.
+- Laser rendering now accounts for ground intersection so a downward beam cannot visually continue below the ground.
+- The gameplay hit test uses the same effective 3D beam direction/range as the visual.
+
 ## Laser
 
 - The laser visual is restored and made more visible with a core beam, cheap glow lines, and a muzzle pulse.
