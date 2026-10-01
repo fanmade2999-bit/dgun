@@ -124,10 +124,19 @@ static GLint uColor=-1;
 static GLuint cubeVbo=0;
 static int viewportW=1, viewportH=1;
 
-static constexpr float WORLD_SIZE=128.0f;
+static constexpr float WORLD_SIZE=1024.0f;
 static constexpr float WORLD_HALF=WORLD_SIZE*0.5f;
 static constexpr float WORLD_TILE_SIZE=2.0f;
 static constexpr int WORLD_TILE_COUNT=int(WORLD_SIZE/WORLD_TILE_SIZE);
+
+// Chunk layer: 16 × 16 tiles per chunk, 32 world units per chunk.
+// The world therefore contains a deterministic 32 × 32 chunk torus.
+static constexpr int CHUNK_TILE_COUNT=16;
+static constexpr float CHUNK_WORLD_SIZE=WORLD_TILE_SIZE*float(CHUNK_TILE_COUNT);
+static constexpr int WORLD_CHUNK_COUNT=WORLD_TILE_COUNT/CHUNK_TILE_COUNT;
+
+static int floorTile(float v);
+static int positiveMod(int v,int m);
 
 static constexpr float BASE_X=0.0f;
 static constexpr float BASE_Z=0.0f;
@@ -174,6 +183,29 @@ static uint32_t worldHash(int tx,int tz) {
     h^=(x<<16)|(z&0xffffu); h*=16777619u;
     h^=h>>13; h*=1274126177u; h^=h>>16;
     return h;
+}
+
+static int chunkCoord(float worldValue) {
+    return int(std::floor(wrapWorld(worldValue)/CHUNK_WORLD_SIZE));
+}
+
+static int chunkLocalTile(float worldValue) {
+    const int tile=floorTile(worldValue);
+    return positiveMod(tile,CHUNK_TILE_COUNT);
+}
+
+static uint32_t chunkHash(int chunkX,int chunkZ) {
+    const uint32_t x=uint32_t(positiveMod(chunkX,WORLD_CHUNK_COUNT));
+    const uint32_t z=uint32_t(positiveMod(chunkZ,WORLD_CHUNK_COUNT));
+    uint32_t h=0x9747b28cu;
+    h^=x+0x9e3779b9u; h*=0x85ebca6bu;
+    h^=z+0xc2b2ae35u; h*=0x27d4eb2fu;
+    h^=h>>15; h*=0x2c1b3c6du; h^=h>>12;
+    return h;
+}
+
+static bool chunkBiomeIsIndustrial(int chunkX,int chunkZ) {
+    return int(chunkHash(chunkX,chunkZ)%7u)==0;
 }
 
 static float tileHeight(int tx,int tz) {
@@ -314,6 +346,8 @@ static WreckState wreck;
 static int movePointer=-1;
 static int aimPointer=-1;
 static int firePointer=-1;
+static int mapPointer=-1;
+static bool mapExpanded=false;
 static float joyX=0.0f, joyY=0.0f;
 static float lastAimX=0.0f, lastAimY=0.0f;
 static constexpr float PLAYER_RADIUS=0.62f;
@@ -512,6 +546,29 @@ static void drawProceduralTerrain(const Mat4& vp) {
             }
         }
     }
+}
+
+static void drawChunkBorders(const Mat4& vp) {
+    const int centerChunkX=chunkCoord(px);
+    const int centerChunkZ=chunkCoord(pz);
+    const float localChunkOriginX=std::floor(wrapWorld(px)/CHUNK_WORLD_SIZE)*CHUNK_WORLD_SIZE;
+    const float localChunkOriginZ=std::floor(wrapWorld(pz)/CHUNK_WORLD_SIZE)*CHUNK_WORLD_SIZE;
+
+    float verts[4*2*3]{};
+    int n=0;
+    for(int i=-2;i<=2;i++) {
+        const float x=localChunkOriginX+float(i)*CHUNK_WORLD_SIZE;
+        verts[n++]=x; verts[n++]=0.02f; verts[n++]=nearestWorldImage(localChunkOriginZ,pz);
+        verts[n++]=x; verts[n++]=0.02f; verts[n++]=nearestWorldImage(localChunkOriginZ+CHUNK_WORLD_SIZE*5.0f,pz);
+    }
+    for(int i=-2;i<=2;i++) {
+        const float z=localChunkOriginZ+float(i)*CHUNK_WORLD_SIZE;
+        verts[n++]=nearestWorldImage(localChunkOriginX,px); verts[n++]=0.025f; verts[n++]=z;
+        verts[n++]=nearestWorldImage(localChunkOriginX+CHUNK_WORLD_SIZE*5.0f,px); verts[n++]=0.025f; verts[n++]=z;
+    }
+    (void)centerChunkX;
+    (void)centerChunkZ;
+    drawLines(vp,verts,n/3,0.20f,0.28f,0.34f,0.55f);
 }
 
 static void drawGrid(const Mat4& vp) {
@@ -1203,8 +1260,124 @@ static void drawMiniBot(const Mat4& vp) {
              0.42f,0.66f,0.78f);
 }
 
+static bool pointInMapButton(float x,float y,float w,float h) {
+    const float cx=w*0.92f;
+    const float cy=h*0.12f;
+    const float radius=h*0.055f;
+    const float dx=x-cx, dy=y-cy;
+    return dx*dx+dy*dy<=radius*radius;
+}
+
+static void drawMinimap(const Mat4& hud,bool expanded) {
+    const int chunkCount=WORLD_CHUNK_COUNT;
+    const int centerX=chunkCoord(px);
+    const int centerZ=chunkCoord(pz);
+
+    if(!expanded) {
+        const float size=viewportH*0.22f;
+        const float x0=viewportW-size-18.0f;
+        const float y0=viewportH*0.05f;
+        drawRect2D(hud,x0,y0,x0+size,y0+size,0.025f,0.04f,0.055f,0.82f);
+
+        constexpr int visible=7;
+        const float cell=size/float(visible);
+        for(int mz=0;mz<visible;mz++) {
+            for(int mx=0;mx<visible;mx++) {
+                const int cx=centerX+mx-visible/2;
+                const int cz=centerZ+mz-visible/2;
+                const uint32_t h=chunkHash(cx,cz);
+                const bool industrial=chunkBiomeIsIndustrial(cx,cz);
+                const float r=industrial?0.38f:0.09f+0.03f*float((h>>3)&3u);
+                const float g=industrial?0.25f:0.16f+0.025f*float((h>>6)&3u);
+                const float b=industrial?0.15f:0.20f+0.03f*float((h>>9)&3u);
+                drawRect2D(hud,x0+mx*cell+1.0f,y0+mz*cell+1.0f,
+                           x0+(mx+1)*cell-1.0f,y0+(mz+1)*cell-1.0f,
+                           r,g,b,0.92f);
+            }
+        }
+        const float pcx=x0+(visible/2+0.5f)*cell;
+        const float pcy=y0+(visible/2+0.5f)*cell;
+        drawCircle2D(hud,pcx,pcy,std::max(3.0f,cell*0.28f),0.95f,0.95f,0.85f,0.95f);
+
+        // Stable landmark markers in the local minimap window.
+        auto marker=[&](int cx,int cz,float r,float g,float b) {
+            const int dx=cx-centerX;
+            const int dz=cz-centerZ;
+            if(std::abs(dx)>visible/2 || std::abs(dz)>visible/2) return;
+            const float mx= x0+(float(dx+visible/2)+0.5f)*cell;
+            const float my= y0+(float(dz+visible/2)+0.5f)*cell;
+            drawCircle2D(hud,mx,my,std::max(2.5f,cell*0.18f),r,g,b,0.95f);
+        };
+        marker(chunkCoord(BASE_X),chunkCoord(BASE_Z),0.30f,0.80f,1.0f);
+        marker(chunkCoord(FACILITY_X),chunkCoord(FACILITY_Z),0.90f,0.60f,0.20f);
+        if(!bossDefeated) marker(chunkCoord(BOSS_X),chunkCoord(BOSS_Z),0.95f,0.25f,0.15f);
+        return;
+    }
+
+    // Expanded map: entire finite torus, with chunk grid and persistent landmarks.
+    const float size=std::min(viewportW*0.82f,viewportH*0.82f);
+    const float x0=(viewportW-size)*0.50f;
+    const float y0=(viewportH-size)*0.50f;
+    drawRect2D(hud,x0-10.0f,y0-30.0f,x0+size+10.0f,y0+size+10.0f,
+               0.015f,0.025f,0.040f,0.96f);
+
+    const float cell=size/float(chunkCount);
+    for(int mz=0;mz<chunkCount;mz++) {
+        for(int mx=0;mx<chunkCount;mx++) {
+            const int signedX=mx-(chunkCount/2);
+            const int signedZ=mz-(chunkCount/2);
+            const uint32_t h=chunkHash(signedX,signedZ);
+            const bool industrial=chunkBiomeIsIndustrial(signedX,signedZ);
+            const float r=industrial?0.40f:0.07f+0.025f*float((h>>3)&3u);
+            const float g=industrial?0.24f:0.12f+0.024f*float((h>>6)&3u);
+            const float b=industrial?0.14f:0.18f+0.028f*float((h>>9)&3u);
+            drawRect2D(hud,x0+mx*cell+1.0f,y0+mz*cell+1.0f,
+                       x0+(mx+1)*cell-1.0f,y0+(mz+1)*cell-1.0f,
+                       r,g,b,0.92f);
+        }
+    }
+
+    // Player position in canonical map space.
+    const float mapX=wrapWorld(px)+WORLD_HALF;
+    const float mapZ=wrapWorld(pz)+WORLD_HALF;
+    const float pcx=x0+(mapX/WORLD_SIZE)*size;
+    const float pcy=y0+(mapZ/WORLD_SIZE)*size;
+    drawCircle2D(hud,pcx,pcy,6.0f,0.95f,0.95f,0.85f,1.0f);
+
+    auto landmarkAbs=[&](float wx,float wz,float r,float g,float b) {
+        const float mx=x0+((wrapWorld(wx)+WORLD_HALF)/WORLD_SIZE)*size;
+        const float my=y0+((wrapWorld(wz)+WORLD_HALF)/WORLD_SIZE)*size;
+        drawCircle2D(hud,mx,my,5.0f,r,g,b,0.95f);
+    };
+    landmarkAbs(BASE_X,BASE_Z,0.30f,0.80f,1.0f);
+    landmarkAbs(FACILITY_X,FACILITY_Z,0.90f,0.60f,0.20f);
+    if(!bossDefeated) landmarkAbs(BOSS_X,BOSS_Z,0.95f,0.25f,0.15f);
+
+    // Current chunk highlight.
+    const float cpx=std::floor(mapX/CHUNK_WORLD_SIZE/WORLD_CHUNK_COUNT*WORLD_CHUNK_COUNT);
+    const float cpz=std::floor(mapZ/CHUNK_WORLD_SIZE);
+    const float hx=x0+(cpx/float(WORLD_CHUNK_COUNT))*size;
+    const float hy=y0+(cpz/float(WORLD_CHUNK_COUNT))*size;
+    const float outline[]={
+        hx,hy,0, hx+cell,hy,0,
+        hx+cell,hy,0, hx+cell,hy+cell,0,
+        hx+cell,hy+cell,0, hx,hy+cell,0,
+        hx,hy+cell,0, hx,hy,0
+    };
+    drawLines(hud,outline,8,0.92f,0.92f,0.70f,0.85f);
+
+    char mapTitle[32]{};
+    std::snprintf(mapTitle,sizeof(mapTitle),"MAP C%d,%d",centerX,centerZ);
+    drawText2D(hud,mapTitle,x0,y0-18.0f,2.7f,0.86f,0.92f,0.96f,0.95f);
+    drawText2D(hud,"MAP",viewportW*0.88f,viewportH*0.105f,3.0f,
+               1.0f,1.0f,1.0f,0.95f);
+}
+
 static void drawHud() {
     const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
+
+    // Mini map is always available and expands in place.
+    drawMinimap(hud,mapExpanded);
 
     glDisable(GL_DEPTH_TEST);
 
@@ -1355,16 +1528,31 @@ static void drawHud() {
                    0.70f,0.86f,0.92f,0.75f);
     }
 
-    // Canonical wrapped world coordinates make the finite circumference visible
-    // while still letting the player traverse indefinitely through the seam.
+    // Wrapped world coordinates + chunk/local-tile coordinates.
     char xText[32]{};
     char zText[32]{};
+    char cText[32]{};
     std::snprintf(xText,sizeof(xText),"X%d",(int)std::round(wrapWorld(px)));
     std::snprintf(zText,sizeof(zText),"Z%d",(int)std::round(wrapWorld(pz)));
-    drawText2D(hud,xText,viewportW*0.02f,viewportH*0.92f,2.6f,
+    std::snprintf(cText,sizeof(cText),"C%d,%d T%d,%d",
+                  chunkCoord(px),chunkCoord(pz),
+                  chunkLocalTile(px),chunkLocalTile(pz));
+    drawText2D(hud,xText,viewportW*0.02f,viewportH*0.90f,2.4f,
                0.72f,0.86f,0.92f,0.80f);
-    drawText2D(hud,zText,viewportW*0.10f,viewportH*0.92f,2.6f,
+    drawText2D(hud,zText,viewportW*0.08f,viewportH*0.90f,2.4f,
                0.72f,0.86f,0.92f,0.80f);
+    drawText2D(hud,cText,viewportW*0.15f,viewportH*0.90f,2.15f,
+               0.64f,0.80f,0.88f,0.78f);
+
+    const float mapX=viewportW*0.92f;
+    const float mapY=viewportH*0.12f;
+    const float mapR=viewportH*0.055f;
+    drawCircle2D(hud,mapX,mapY,mapR,
+                 mapExpanded?0.72f:0.34f,
+                 mapExpanded?0.82f:0.54f,
+                 mapExpanded?0.42f:0.52f,
+                 0.75f);
+    drawText2D(hud,"MAP",mapX-22.0f,mapY-10.0f,2.4f,1.0f,1.0f,1.0f,0.95f);
 
 
     // Context hint: the ACT button only does something when a relevant
@@ -1879,6 +2067,7 @@ static void frame() {
     const Mat4 vp=mulM(proj,lookAt(eye,target,{0,1,0}));
 
     drawProceduralTerrain(vp);
+    drawChunkBorders(vp);
     drawGrid(vp);
     drawArenaBlocks(vp);
     drawTestWorldStructures(vp);
@@ -1902,6 +2091,13 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
     const bool leftZone = x < w*0.45f;
 
     if(action==ACTION_DOWN || action==ACTION_POINTER_DOWN) {
+        if(!leftZone && pointInMapButton(x,y,w,h) && mapPointer<0) {
+            mapPointer=pointerId;
+            mapExpanded=!mapExpanded;
+            return;
+        }
+
+        if(mapExpanded) return;
         if(leftZone && movePointer<0) {
             movePointer=pointerId;
             const float baseX=w*0.18f;
@@ -1954,6 +2150,11 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
     }
 
     if(action==ACTION_UP || action==ACTION_POINTER_UP || action==ACTION_CANCEL) {
+        if(pointerId==mapPointer || action==ACTION_CANCEL) {
+            mapPointer=-1;
+        }
+        if(mapExpanded && action!=ACTION_CANCEL) return;
+
         if(pointerId==movePointer || action==ACTION_CANCEL) {
             movePointer=-1;
             joyX=0.0f;
