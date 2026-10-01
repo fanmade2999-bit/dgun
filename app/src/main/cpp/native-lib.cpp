@@ -468,8 +468,10 @@ static void drawProceduralTerrain(const Mat4& vp) {
             const int tz=centerTz+oz;
             const float centerX=(float(tx)+0.5f)*WORLD_TILE_SIZE;
             const float centerZ=(float(tz)+0.5f)*WORLD_TILE_SIZE;
-            const float localX=px + float(ox + (centerTx-floorTile(px))) * WORLD_TILE_SIZE;
-            const float localZ=pz + float(oz + (centerTz-floorTile(pz))) * WORLD_TILE_SIZE;
+            // Render the tile's canonical center at its nearest torus image,
+            // then offset the neighboring tiles around that center.
+            const float localX=nearestWorldImage(centerX,px);
+            const float localZ=nearestWorldImage(centerZ,pz);
             const uint32_t h=worldHash(tx,tz);
 
             // Skip most tiles to keep the draw cost low, but vary all visible
