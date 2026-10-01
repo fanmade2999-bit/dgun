@@ -129,6 +129,13 @@ static constexpr float WORLD_HALF=WORLD_SIZE*0.5f;
 static constexpr float WORLD_TILE_SIZE=2.0f;
 static constexpr int WORLD_TILE_COUNT=int(WORLD_SIZE/WORLD_TILE_SIZE);
 
+static constexpr float BASE_X=0.0f;
+static constexpr float BASE_Z=0.0f;
+static constexpr float FACILITY_X=11.0f;
+static constexpr float FACILITY_Z=-6.0f;
+static constexpr float BOSS_X=14.0f;
+static constexpr float BOSS_Z=8.0f;
+
 static float px=0.0f, pz=0.0f;
 static float yaw=0.0f, aimPitch=0.18f;
 
@@ -143,6 +150,10 @@ static float wrappedDelta(float from, float to) {
     if(d>WORLD_HALF) d-=WORLD_SIZE;
     if(d< -WORLD_HALF) d+=WORLD_SIZE;
     return d;
+}
+
+static float nearestWorldImage(float value,float reference) {
+    return reference+wrappedDelta(reference,value);
 }
 
 static int floorTile(float v) {
@@ -287,13 +298,6 @@ enum class BaseMode : uint8_t {
     ORBITAL
 };
 static BaseMode baseMode=BaseMode::LAND;
-
-static constexpr float BASE_X=0.0f;
-static constexpr float BASE_Z=0.0f;
-static constexpr float FACILITY_X=11.0f;
-static constexpr float FACILITY_Z=-6.0f;
-static constexpr float BOSS_X=14.0f;
-static constexpr float BOSS_Z=8.0f;
 
 static bool actionPointerActive=false;
 static int actionPointer=-1;
@@ -520,11 +524,15 @@ static void drawGrid(const Mat4& vp) {
 }
 
 static void drawArenaBlocks(const Mat4& vp) {
-    // Low-cost cover/landmark silhouettes. These become real facilities/terrain later.
-    drawCube(vp,{-7.0f,0.65f,-4.0f},{1.4f,0.65f,1.2f},0.0f,0.12f,0.20f,0.26f);
-    drawCube(vp,{-6.0f,0.9f,6.0f},{2.0f,0.9f,1.0f},0.08f,0.15f,0.24f,0.20f);
-    drawCube(vp,{7.0f,0.8f,5.0f},{1.2f,0.8f,1.2f},-0.24f,0.22f,0.17f,0.12f);
-    drawCube(vp,{8.0f,0.5f,-2.5f},{0.8f,0.5f,2.2f},0.5f,0.12f,0.17f,0.22f);
+    // Legacy test cover, rendered at the nearest torus image.
+    drawCube(vp,{nearestWorldImage(-7.0f,px),0.65f,nearestWorldImage(-4.0f,pz)},
+             {1.4f,0.65f,1.2f},0.0f,0.12f,0.20f,0.26f);
+    drawCube(vp,{nearestWorldImage(-6.0f,px),0.9f,nearestWorldImage(6.0f,pz)},
+             {2.0f,0.9f,1.0f},0.08f,0.15f,0.24f,0.20f);
+    drawCube(vp,{nearestWorldImage(7.0f,px),0.8f,nearestWorldImage(5.0f,pz)},
+             {1.2f,0.8f,1.2f},-0.24f,0.22f,0.17f,0.12f);
+    drawCube(vp,{nearestWorldImage(8.0f,px),0.5f,nearestWorldImage(-2.5f,pz)},
+             {0.8f,0.5f,2.2f},0.5f,0.12f,0.17f,0.22f);
 }
 
 struct BeamObstacle {
@@ -836,42 +844,46 @@ static bool pointInFireButton(float x, float y, float w, float h) {
 static int closestPlayerPartOnRay(Vec3 start,Vec3 dir,float maxDistance);
 
 static void drawEnemy(const Mat4& vp) {
+    const float ex=nearestWorldImage(enemyX,px);
+    const float ez=nearestWorldImage(enemyZ,pz);
     const float r = enemyHitFlash>0 ? 0.95f : 0.55f;
     const float g = enemyHitFlash>0 ? 0.85f : 0.18f;
     const float b = enemyHitFlash>0 ? 0.20f : 0.14f;
 
-    drawCube(vp,{enemyX,0.95f,enemyZ},{0.90f,0.85f,0.90f},enemyYaw,r,g,b);
-    drawCube(vp,{enemyX,1.70f,enemyZ},{0.45f,0.35f,0.45f},enemyYaw,0.45f,0.15f,0.12f);
-    drawCube(vp,localOffset({enemyX,0,enemyZ},{0,1.40f,-0.95f},enemyYaw),
+    drawCube(vp,{ex,0.95f,ez},{0.90f,0.85f,0.90f},enemyYaw,r,g,b);
+    drawCube(vp,{ex,1.70f,ez},{0.45f,0.35f,0.45f},enemyYaw,0.45f,0.15f,0.12f);
+    drawCube(vp,localOffset({ex,0,ez},{0,1.40f,-0.95f},enemyYaw),
              {0.18f,0.14f,0.70f},enemyYaw,0.78f,0.25f,0.18f);
 }
 
 static void drawBoss(const Mat4& vp) {
     if(bossDefeated) return;
 
+    const float bx=nearestWorldImage(bossX,px);
+    const float bz=nearestWorldImage(bossZ,pz);
     const float r = bossHitFlash>0 ? 1.0f : 0.34f;
     const float g = bossHitFlash>0 ? 0.65f : 0.12f;
     const float b = bossHitFlash>0 ? 0.16f : 0.08f;
 
     // Heavy core.
-    drawCube(vp,{bossX,1.20f,bossZ},{1.35f,1.10f,1.20f},bossYaw,r,g,b);
-    drawCube(vp,localOffset({bossX,0,bossZ},{0,2.55f,0.0f},bossYaw),
+    drawCube(vp,{bx,1.20f,bz},{1.35f,1.10f,1.20f},bossYaw,r,g,b);
+    drawCube(vp,localOffset({bx,0,bz},{0,2.55f,0.0f},bossYaw),
              {0.72f,0.48f,0.72f},bossYaw,0.50f,0.14f,0.10f);
 
     // Oversized shoulder / arm blocks.
-    drawCube(vp,localOffset({bossX,0,bossZ},{-1.55f,1.30f,0.0f},bossYaw),
+    drawCube(vp,localOffset({bx,0,bz},{-1.55f,1.30f,0.0f},bossYaw),
              {0.52f,0.72f,0.62f},bossYaw,0.28f,0.10f,0.08f);
-    drawCube(vp,localOffset({bossX,0,bossZ},{ 1.55f,1.30f,0.0f},bossYaw),
+    drawCube(vp,localOffset({bx,0,bz},{ 1.55f,1.30f,0.0f},bossYaw),
              {0.52f,0.72f,0.62f},bossYaw,0.28f,0.10f,0.08f);
 
     // Legs.
-    drawCube(vp,localOffset({bossX,0,bossZ},{-0.62f,-0.10f,0.0f},bossYaw),
+    drawCube(vp,localOffset({bx,0,bz},{-0.62f,-0.10f,0.0f},bossYaw),
              {0.45f,0.72f,0.52f},bossYaw,0.24f,0.09f,0.07f);
-    drawCube(vp,localOffset({bossX,0,bossZ},{ 0.62f,-0.10f,0.0f},bossYaw),
+    drawCube(vp,localOffset({bx,0,bz},{ 0.62f,-0.10f,0.0f},bossYaw),
              {0.45f,0.72f,0.52f},bossYaw,0.24f,0.09f,0.07f);
 
     // Large front cannon.
-    drawCube(vp,localOffset({bossX,0,bossZ},{0,1.65f,-1.45f},bossYaw),
+    drawCube(vp,localOffset({bx,0,bz},{0,1.65f,-1.45f},bossYaw),
              {0.25f,0.24f,1.10f},bossYaw,0.72f,0.20f,0.12f);
 
     // Landmark beacon.
@@ -938,11 +950,12 @@ static void drawLaser(const Mat4& vp) {
 static void drawBossLaser(const Mat4& vp) {
     if(bossLaserT<=0.0f || bossDefeated) return;
 
-    const Vec3 start={bossX,1.65f,bossZ};
+    const Vec3 start={nearestWorldImage(bossX,px),1.65f,
+                      nearestWorldImage(bossZ,pz)};
     const Vec3 end={
-        bossX + bossShotDirX*16.0f,
+        start.x + bossShotDirX*16.0f,
         1.20f,
-        bossZ + bossShotDirZ*16.0f
+        start.z + bossShotDirZ*16.0f
     };
     const float verts[]={
         start.x,start.y,start.z,
@@ -1105,20 +1118,26 @@ static void drawTestWorldStructures(const Mat4& vp) {
     // Home base: land prototype now; the base abstraction is already separate
     // so an orbital/mobile base can replace this visual later.
     const float baseY=baseMode==BaseMode::ORBITAL ? 4.0f : 0.85f;
-    drawCube(vp,{BASE_X,baseY,BASE_Z},{2.0f,0.85f,2.0f},0.0f,
+    const float baseDrawX=nearestWorldImage(BASE_X,px);
+    const float baseDrawZ=nearestWorldImage(BASE_Z,pz);
+    drawCube(vp,{baseDrawX,baseY,baseDrawZ},{2.0f,0.85f,2.0f},0.0f,
              0.13f,0.24f,0.33f);
-    drawCube(vp,{BASE_X,baseY+1.15f,BASE_Z},{1.0f,0.25f,1.0f},0.0f,
+    drawCube(vp,{baseDrawX,baseY+1.15f,baseDrawZ},{1.0f,0.25f,1.0f},0.0f,
              0.26f,0.55f,0.70f);
 
     // Discovery facility.
-    drawCube(vp,{FACILITY_X,1.0f,FACILITY_Z},{1.5f,1.0f,1.5f},0.1f,
+    const float facilityDrawX=nearestWorldImage(FACILITY_X,px);
+    const float facilityDrawZ=nearestWorldImage(FACILITY_Z,pz);
+    drawCube(vp,{facilityDrawX,1.0f,facilityDrawZ},{1.5f,1.0f,1.5f},0.1f,
              0.26f,0.20f,0.14f);
-    drawCube(vp,{FACILITY_X,2.25f,FACILITY_Z},{0.75f,0.25f,0.75f},0.1f,
+    drawCube(vp,{facilityDrawX,2.25f,facilityDrawZ},{0.75f,0.25f,0.75f},0.1f,
              0.50f,0.34f,0.12f);
 
     // Unknown equipment pod outside the facility.
     if(unknownEquipment>0) {
-        drawCube(vp,{FACILITY_X+2.0f,0.35f,FACILITY_Z},{0.30f,0.35f,0.30f},0.2f,
+        drawCube(vp,{nearestWorldImage(FACILITY_X+2.0f,px),0.35f,
+                     nearestWorldImage(FACILITY_Z,pz)},
+                 {0.30f,0.35f,0.30f},0.2f,
                  0.34f,0.52f,0.65f);
     }
 }
@@ -1141,7 +1160,8 @@ static void drawWreck(const Mat4& vp) {
             const float s=0.72f+0.18f*fraction;
 
             drawCube(
-                vp,p,
+                vp,
+                {nearestWorldImage(p.x,px),p.y,nearestWorldImage(p.z,pz)},
                 {d.radius*s*0.68f,d.radius*s*0.48f,d.radius*s*0.68f},
                 wreck.yaw,
                 0.08f+0.10f*fraction,
@@ -1329,7 +1349,7 @@ static void drawHud() {
     char xText[32]{};
     char zText[32]{};
     std::snprintf(xText,sizeof(xText),"X%d",(int)std::round(wrapWorld(px)));
-    std::snprintf(zText,sizeof(zText),"X%d",(int)std::round(wrapWorld(pz)));
+    std::snprintf(zText,sizeof(zText),"Z%d",(int)std::round(wrapWorld(pz)));
     drawText2D(hud,xText,viewportW*0.02f,viewportH*0.92f,2.6f,
                0.72f,0.86f,0.92f,0.80f);
     drawText2D(hud,zText,viewportW*0.10f,viewportH*0.92f,2.6f,
@@ -1600,7 +1620,8 @@ static void updateEnemy(float dt) {
         enemyShotDirX=dx/std::max(0.001f,distance);
         enemyShotDirZ=dz/std::max(0.001f,distance);
 
-        const Vec3 shotStart={enemyX,1.45f,enemyZ};
+        const Vec3 shotStart={nearestWorldImage(enemyX,px),1.45f,
+                              nearestWorldImage(enemyZ,pz)};
         const Vec3 target={px,1.15f,pz};
         const Vec3 shotDir=norm(sub(target,shotStart));
         const int hitPart=closestPlayerPartOnRay(shotStart,shotDir,distance+1.0f);
@@ -1768,7 +1789,10 @@ static void update(float dt) {
             if(groundDistance>0.02f) maxBeamDistance=std::min(maxBeamDistance,groundDistance);
         }
 
-        const Vec3 toEnemy={enemyX-start.x,0.95f-start.y,enemyZ-start.z};
+        const Vec3 enemyImage={
+            nearestWorldImage(enemyX,px),0.95f,nearestWorldImage(enemyZ,pz)
+        };
+        const Vec3 toEnemy=sub(enemyImage,start);
         const float along=dot(toEnemy,dir);
 
         if(along>0.0f && along<=maxBeamDistance+0.05f && along<LASER_MAX_RANGE) {
@@ -1787,7 +1811,10 @@ static void update(float dt) {
         }
 
         if(!bossDefeated) {
-            const Vec3 toBoss={bossX-start.x,1.35f-start.y,bossZ-start.z};
+            const Vec3 bossImage={
+                nearestWorldImage(bossX,px),1.35f,nearestWorldImage(bossZ,pz)
+            };
+            const Vec3 toBoss=sub(bossImage,start);
             const float bossAlong=dot(toBoss,dir);
             if(bossAlong>0.0f && bossAlong<=maxBeamDistance+0.05f && bossAlong<LASER_MAX_RANGE) {
                 const Vec3 closestBoss=add(start,mul(dir,bossAlong));
