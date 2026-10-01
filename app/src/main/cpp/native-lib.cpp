@@ -199,6 +199,12 @@ static int identifiedEquipment=0;
 static float fabricationTimer=0.0f;
 static int fabricationSlot=-1;
 
+enum class BaseMode : uint8_t {
+    LAND,
+    ORBITAL
+};
+static BaseMode baseMode=BaseMode::LAND;
+
 static constexpr float BASE_X=0.0f;
 static constexpr float BASE_Z=0.0f;
 static constexpr float FACILITY_X=11.0f;
@@ -206,6 +212,8 @@ static constexpr float FACILITY_Z=-6.0f;
 
 static bool actionPointerActive=false;
 static int actionPointer=-1;
+static int swapPointer=-1;
+static bool actionPointerActive=false;
 
 struct WreckState {
     bool active=false;
@@ -579,12 +587,31 @@ static bool nearPoint(float x,float z,float tx,float tz,float radius) {
     return dx*dx+dz*dz<=radius*radius;
 }
 
+static bool pointInSwapButton(float x,float y,float w,float h) {
+    const float cx=w*0.84f;
+    const float cy=h*0.25f;
+    const float radius=h*0.095f;
+    const float dx=x-cx, dy=y-cy;
+    return dx*dx+dy*dy<=radius*radius;
+}
+
 static bool pointInActionButton(float x,float y,float w,float h) {
     const float cx=w*0.68f;
     const float cy=h*0.78f;
     const float radius=h*0.115f;
     const float dx=x-cx, dy=y-cy;
     return dx*dx+dy*dy<=radius*radius;
+}
+
+static bool performBodySwap() {
+    if(!nearPoint(px,pz,BASE_X,BASE_Z,2.8f)) return false;
+
+    const int other=findOtherBodySlot();
+    if(other<0 || fabricationTimer>0.0f) return false;
+
+    saveActiveBodyToPool();
+    loadBodyFromSlot(other);
+    return true;
 }
 
 static bool performContextAction() {
@@ -755,6 +782,7 @@ static uint8_t glyphBits(char ch,int row) {
     static constexpr uint8_t E[7] = {31,16,16,30,16,16,31};
     static constexpr uint8_t A[7] = {14,17,17,31,17,17,17};
     static constexpr uint8_t T[7] = {31,4,4,4,4,4,4};
+    static constexpr uint8_t U[7] = {17,17,17,17,17,17,14};
     static constexpr uint8_t F[7] = {31,16,16,30,16,16,16};
     static constexpr uint8_t I[7] = {31,4,4,4,4,4,31};
     static constexpr uint8_t R[7] = {30,17,17,30,20,18,17};
@@ -788,6 +816,7 @@ static uint8_t glyphBits(char ch,int row) {
         case 'E': return E[row];
         case 'A': return A[row];
         case 'T': return T[row];
+        case 'U': return U[row];
         case 'F': return F[row];
         case 'I': return I[row];
         case 'R': return R[row];
@@ -853,10 +882,12 @@ static void drawText2D(const Mat4& hud,const char* text,float x,float y,
 }
 
 static void drawTestWorldStructures(const Mat4& vp) {
-    // Home base: a simple four-block fabrication bay.
-    drawCube(vp,{BASE_X,0.85f,BASE_Z},{2.0f,0.85f,2.0f},0.0f,
+    // Home base: land prototype now; the base abstraction is already separate
+    // so an orbital/mobile base can replace this visual later.
+    const float baseY=baseMode==BaseMode::ORBITAL ? 4.0f : 0.85f;
+    drawCube(vp,{BASE_X,baseY,BASE_Z},{2.0f,0.85f,2.0f},0.0f,
              0.13f,0.24f,0.33f);
-    drawCube(vp,{BASE_X,2.0f,BASE_Z},{1.0f,0.25f,1.0f},0.0f,
+    drawCube(vp,{BASE_X,baseY+1.15f,BASE_Z},{1.0f,0.25f,1.0f},0.0f,
              0.26f,0.55f,0.70f);
 
     // Discovery facility.
@@ -961,6 +992,21 @@ static void drawHud() {
     const float aimLabelY=viewportH*0.17f;
     drawText2D(hud,"AIM",aimLabelX,aimLabelY,3.0f,0.70f,0.86f,0.96f,0.70f);
 
+    // Body swap is only available at the home base.
+    const float swapX=viewportW*0.84f;
+    const float swapY=viewportH*0.25f;
+    const float swapR=viewportH*0.095f;
+    const bool canSwap=nearPoint(px,pz,BASE_X,BASE_Z,2.8f)
+        && findOtherBodySlot()>=0
+        && fabricationTimer<=0.0f;
+    drawCircle2D(hud,swapX,swapY,swapR,
+                 swapPointer>=0?0.70f:0.36f,
+                 swapPointer>=0?0.84f:0.55f,
+                 swapPointer>=0?0.42f:0.50f,
+                 canSwap?(swapPointer>=0?0.90f:0.55f):0.18f);
+    drawText2D(hud,"SWAP",swapX-30.0f,swapY-10.0f,3.0f,
+               1.0f,1.0f,1.0f,canSwap?0.95f:0.35f);
+
     // Context action button: salvage at a wreck, identify at a facility,
     // fabricate at base when enough components are available.
     const float actionX=viewportW*0.68f;
@@ -995,14 +1041,25 @@ static void drawHud() {
     drawText2D(hud,countText,bodyX+35.0f,bodyY,3.0f,1.0f,1.0f,1.0f,0.95f);
 
     char resText[32]{};
-    std::snprintf(resText,sizeof(resText),"%d %d",scrap,circuits);
-    drawText2D(hud,resText,viewportW*0.47f,pad+12.0f,2.8f,
-               0.75f,0.88f,0.92f,0.90f);
+    std::snprintf(resText,sizeof(resText),"%d",scrap);
+    drawText2D(hud,"SCRAP",viewportW*0.47f,pad+11.0f,2.4f,
+               0.72f,0.82f,0.86f,0.78f);
+    drawText2D(hud,resText,viewportW*0.56f,pad+11.0f,2.8f,
+               1.0f,1.0f,1.0f,0.95f);
+
+    char circText[32]{};
+    std::snprintf(circText,sizeof(circText),"%d",circuits);
+    drawText2D(hud,"CIRCUIT",viewportW*0.62f,pad+11.0f,2.15f,
+               0.72f,0.82f,0.86f,0.78f);
+    drawText2D(hud,circText,viewportW*0.75f,pad+11.0f,2.8f,
+               1.0f,1.0f,1.0f,0.95f);
 
     char eqText[32]{};
     std::snprintf(eqText,sizeof(eqText),"%d",identifiedEquipment);
-    drawText2D(hud,eqText,viewportW*0.59f,pad+12.0f,2.8f,
+    drawText2D(hud,"ID",viewportW*0.82f,pad+46.0f,2.5f,
                0.98f,0.86f,0.35f,0.95f);
+    drawText2D(hud,eqText,viewportW*0.87f,pad+46.0f,2.8f,
+               1.0f,0.92f,0.60f,0.95f);
 
     if(fabricationTimer>0.0f) {
         char fabText[32]{};
@@ -1090,6 +1147,8 @@ static float calculatePlayerHp() {
     }
     return maxTotal>0.0f ? total*100.0f/maxTotal : 0.0f;
 }
+
+static void resetPlayerBody();
 
 static void saveActiveBodyToPool() {
     StoredBody& b=bodySlots[activeBodySlot];
@@ -1482,6 +1541,9 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             const float radius=h*0.20f;
             joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
+        } else if(!leftZone && pointInSwapButton(x,y,w,h) && swapPointer<0) {
+            swapPointer=pointerId;
+            performBodySwap();
         } else if(!leftZone && pointInActionButton(x,y,w,h) && actionPointer<0) {
             actionPointer=pointerId;
             actionPointerActive=performContextAction();
@@ -1507,7 +1569,7 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
         } else if(pointerId==aimPointer) {
             updateAim(x,y);
-        } else if(pointerId!=firePointer && pointerId!=actionPointer && !leftZone) {
+        } else if(pointerId!=firePointer && pointerId!=actionPointer && pointerId!=swapPointer && !leftZone) {
             // An unclaimed right-side MOVE can become an aim gesture, but a
             // dedicated action/fire pointer never changes role mid-gesture.
             if(pointInFireButton(x,y,w,h) && firePointer<0) {
@@ -1535,6 +1597,9 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
         if(pointerId==actionPointer || action==ACTION_CANCEL) {
             actionPointer=-1;
             actionPointerActive=false;
+        }
+        if(pointerId==swapPointer || action==ACTION_CANCEL) {
+            swapPointer=-1;
         }
         if(pointerId==firePointer || action==ACTION_CANCEL) {
             firePointer=-1;
