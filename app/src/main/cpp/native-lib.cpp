@@ -131,9 +131,11 @@ static float playerHp=100.0f;
 static float respawnTimer=0.0f;
 
 static int movePointer=-1;
+static int aimPointer=-1;
 static int firePointer=-1;
 static float joyX=0.0f, joyY=0.0f;
-static float lastAimX=0.0f;
+static float lastAimX=0.0f, lastAimY=0.0f;
+static constexpr float PLAYER_RADIUS=0.62f;
 
 static float enemyX=5.0f, enemyZ=-7.0f;
 static float enemyYaw=0.0f;
@@ -322,6 +324,61 @@ static void drawMech(const Mat4& vp) {
              {0.13f,0.13f,0.85f},yaw,0.38f,0.55f,0.78f);
 }
 
+struct ObstacleBox {
+    float minX, maxX;
+    float minZ, maxZ;
+};
+
+static constexpr ObstacleBox OBSTACLES[] = {
+    {-8.40f,-5.60f,-5.20f,-2.80f},
+    {-8.00f,-4.00f, 5.00f, 7.00f},
+    { 5.80f, 8.20f, 3.80f, 6.20f},
+    { 7.20f, 8.80f,-4.70f,-0.30f}
+};
+
+static bool collidesObstacle(float x, float z, float radius) {
+    for (const auto& b : OBSTACLES) {
+        const float cx = std::clamp(x,b.minX,b.maxX);
+        const float cz = std::clamp(z,b.minZ,b.maxZ);
+        const float dx = x-cx;
+        const float dz = z-cz;
+        if (dx*dx+dz*dz < radius*radius) return true;
+    }
+    return false;
+}
+
+static void movePlayer(float dx, float dz) {
+    const float nextX = std::clamp(px+dx,-18.0f,18.0f);
+    if (!collidesObstacle(nextX,pz,PLAYER_RADIUS)) {
+        px=nextX;
+    }
+
+    const float nextZ = std::clamp(pz+dz,-18.0f,18.0f);
+    if (!collidesObstacle(px,nextZ,PLAYER_RADIUS)) {
+        pz=nextZ;
+    }
+}
+
+static void moveEnemy(float dx, float dz) {
+    const float nextX = std::clamp(enemyX+dx,-18.0f,18.0f);
+    if (!collidesObstacle(nextX,enemyZ,0.65f)) {
+        enemyX=nextX;
+    }
+
+    const float nextZ = std::clamp(enemyZ+dz,-18.0f,18.0f);
+    if (!collidesObstacle(enemyX,nextZ,0.65f)) {
+        enemyZ=nextZ;
+    }
+}
+
+static bool pointInFireButton(float x, float y, float w, float h) {
+    const float cx=w*0.84f;
+    const float cy=h*0.78f;
+    const float radius=h*0.135f;
+    const float dx=x-cx, dy=y-cy;
+    return dx*dx+dy*dy <= radius*radius;
+}
+
 static void drawEnemy(const Mat4& vp) {
     const float r = enemyHitFlash>0 ? 0.95f : 0.55f;
     const float g = enemyHitFlash>0 ? 0.85f : 0.18f;
@@ -395,29 +452,99 @@ static void drawCircle2D(const Mat4& vp,float cx,float cy,float radius,
     glDrawArrays(GL_LINE_STRIP,0,SEG+1);
 }
 
+static uint8_t glyphBits(char ch,int row) {
+    static constexpr uint8_t H[7] = {17,17,17,31,17,17,17};
+    static constexpr uint8_t P[7] = {30,17,17,30,16,16,16};
+    static constexpr uint8_t E[7] = {31,16,16,30,16,16,31};
+    static constexpr uint8_t A[7] = {14,17,17,31,17,17,17};
+    static constexpr uint8_t T[7] = {31,4,4,4,4,4,4};
+    static constexpr uint8_t F[7] = {31,16,16,30,16,16,16};
+    static constexpr uint8_t I[7] = {31,4,4,4,4,4,31};
+    static constexpr uint8_t R[7] = {30,17,17,30,20,18,17};
+    static constexpr uint8_t M[7] = {17,27,21,17,17,17,17};
+    static constexpr uint8_t O[7] = {14,17,17,17,17,17,14};
+    static constexpr uint8_t V[7] = {17,17,17,17,17,10,4};
+    static constexpr uint8_t W[7] = {17,17,17,21,21,21,10};
+
+    if(row<0 || row>=7) return 0;
+    switch(ch) {
+        case 'H': return H[row];
+        case 'P': return P[row];
+        case 'E': return E[row];
+        case 'A': return A[row];
+        case 'T': return T[row];
+        case 'F': return F[row];
+        case 'I': return I[row];
+        case 'R': return R[row];
+        case 'M': return M[row];
+        case 'O': return O[row];
+        case 'V': return V[row];
+        case 'W': return W[row];
+        default: return 0;
+    }
+}
+
+static void drawText2D(const Mat4& hud,const char* text,float x,float y,
+                       float scale,float r,float g,float b,float a=1.0f) {
+    float verts[10000]{};
+    int n=0;
+    float cursor=x;
+
+    for(int ci=0;text[ci] && n<9900;ci++) {
+        const char ch=text[ci];
+        for(int row=0;row<7;row++) {
+            const uint8_t bits=glyphBits(ch,row);
+            for(int col=0;col<5;col++) {
+                if((bits & (1u<<(4-col)))==0) continue;
+
+                const float x1=cursor+float(col)*scale;
+                const float y1=y+float(row)*scale;
+                const float x2=x1+scale;
+                const float y2=y1+scale;
+
+                const float q[]={
+                    x1,y1,0, x2,y1,0, x2,y2,0,
+                    x1,y1,0, x2,y2,0, x1,y2,0
+                };
+                for(float v:q) verts[n++]=v;
+            }
+        }
+        cursor += 7.0f*scale;
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER,0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,0,verts);
+    glUniformMatrix4fv(uMvp,1,GL_FALSE,hud.m);
+    glUniform4f(uColor,r,g,b,a);
+    glDrawArrays(GL_TRIANGLES,0,n/3);
+}
+
 static void drawHud() {
     const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
 
     glDisable(GL_DEPTH_TEST);
 
-    // HP and heat bars.
     const float pad=22.0f;
     const float barW=viewportW*0.28f;
     const float barH=18.0f;
+
+    // Green = HP. Blue = weapon heat.
     drawRect2D(hud,pad,pad,pad+barW,pad+barH,0.03f,0.04f,0.05f,0.85f);
     drawRect2D(hud,pad,pad,pad+barW*(playerHp/100.0f),pad+barH,0.18f,0.78f,0.30f,0.92f);
+    drawText2D(hud,"HP",pad+6.0f,pad+2.0f,3.0f,0.85f,1.0f,0.90f,0.95f);
 
     const float heatY=pad+barH+10.0f;
-    drawRect2D(hud,pad,heatY,pad+barW,heatY+12.0f,0.03f,0.04f,0.05f,0.85f);
-    drawRect2D(hud,pad,heatY,pad+barW*std::min(1.0f,heat),heatY+12.0f,
+    drawRect2D(hud,pad,heatY,pad+barW,heatY+16.0f,0.03f,0.04f,0.05f,0.85f);
+    drawRect2D(hud,pad,heatY,pad+barW*std::min(1.0f,heat),heatY+16.0f,
                0.18f,0.72f,0.95f,0.92f);
+    drawText2D(hud,"HEAT",pad+6.0f,heatY+1.0f,3.0f,0.80f,0.95f,1.0f,0.95f);
 
-    // Simple targeting reticle.
+    // Targeting reticle.
     const float cx=viewportW*0.50f;
     const float cy=viewportH*0.47f;
     drawCircle2D(hud,cx,cy,20.0f,0.6f,0.8f,0.9f,0.70f);
 
-    // Touch guides.
+    // Left-side movement control.
     const float joyBaseX=viewportW*0.18f;
     const float joyBaseY=viewportH*0.78f;
     const float joyR=viewportH*0.20f;
@@ -425,37 +552,36 @@ static void drawHud() {
     const float joyKnobY=joyBaseY+joyY*joyR;
     drawCircle2D(hud,joyBaseX,joyBaseY,joyR,0.45f,0.58f,0.68f,0.42f);
     drawCircle2D(hud,joyKnobX,joyKnobY,joyR*0.42f,0.65f,0.82f,0.95f,0.70f);
+    drawText2D(hud,"MOVE",joyBaseX-35.0f,joyBaseY-joyR-23.0f,3.0f,0.75f,0.88f,0.95f,0.82f);
 
+    // Right-side aim region: swipe here, but it does not fire.
+    const float aimLabelX=viewportW*0.68f;
+    const float aimLabelY=viewportH*0.17f;
+    drawText2D(hud,"AIM",aimLabelX,aimLabelY,3.0f,0.70f,0.86f,0.96f,0.70f);
+
+    // Explicit fire button. Swiping elsewhere on the right no longer fires.
     const float fireX=viewportW*0.84f;
     const float fireY=viewportH*0.78f;
-    const float fireR=viewportH*0.13f;
+    const float fireR=viewportH*0.135f;
     drawCircle2D(hud,fireX,fireY,fireR,
-                 firePointer>=0?0.25f:0.55f,
-                 firePointer>=0?0.90f:0.65f,
-                 firePointer>=0?1.00f:0.72f,
-                 firePointer>=0?0.78f:0.40f);
-
-    // Aim hint: a small line near the fire control shows the active yaw direction.
-    const float aimLen=viewportH*0.11f;
-    const float ax=fireX+std::sin(yaw)*aimLen;
-    const float ay=fireY-std::cos(yaw)*aimLen;
-    const float guide[]={
-        fireX,fireY,0,
-        ax,ay,0
-    };
-    drawLines(hud,guide,2,0.70f,0.88f,1.0f,0.65f);
+                 firePointer>=0?0.20f:0.48f,
+                 firePointer>=0?0.84f:0.64f,
+                 firePointer>=0?1.00f:0.80f,
+                 firePointer>=0?0.85f:0.48f);
+    drawText2D(hud,"FIRE",fireX-39.0f,fireY-10.0f,3.0f,1.0f,1.0f,1.0f,0.95f);
 
     glEnable(GL_DEPTH_TEST);
 }
 
 static void updateAim(float x, float y) {
     const float dx=x-lastAimX;
-    yaw += dx*0.0075f;
-    lastAimX=x;
+    const float dy=y-lastAimY;
 
-    // A small amount of vertical aim motion changes the cannon elevation.
-    const float centerY=viewportH*0.50f;
-    aimPitch += (y-centerY)*0.0008f;
+    yaw += dx*0.0075f;
+    aimPitch += dy*0.0040f;
+
+    lastAimX=x;
+    lastAimY=y;
     aimPitch=std::clamp(aimPitch,0.15f,1.15f);
 }
 
@@ -479,14 +605,12 @@ static void updateEnemy(float dt) {
 
     if(distance>3.2f) {
         const float speed=1.10f;
-        enemyX += (dx/distance)*speed*dt;
-        enemyZ += (dz/distance)*speed*dt;
+        moveEnemy((dx/distance)*speed*dt,(dz/distance)*speed*dt);
     } else {
         const float orbit=0.55f;
         const float sideX=std::cos(enemyYaw);
         const float sideZ=std::sin(enemyYaw);
-        enemyX += sideX*orbit*dt;
-        enemyZ += sideZ*orbit*dt;
+        moveEnemy(sideX*orbit*dt,sideZ*orbit*dt);
     }
 
     enemyAttackTimer-=dt;
@@ -502,17 +626,22 @@ static void updateEnemy(float dt) {
 }
 
 static void update(float dt) {
-    if(respawnTimer>0.0f) {
+    const bool disabled = respawnTimer>0.0f;
+
+    if(disabled) {
         respawnTimer=std::max(0.0f,respawnTimer-dt);
         heat=std::max(0.0f,heat-dt*0.7f);
+        laserT=0.0f;
+        firePointer=-1;
+
         if(respawnTimer<=0.0f) {
             px=0.0f;
             pz=0.0f;
             yaw=0.0f;
             playerHp=100.0f;
-            movePointer=-1;
-            firePointer=-1;
-            joyX=joyY=0.0f;
+            heat=0.0f;
+            // Keep the movement pointer alive. If the player's thumb is still
+            // on the joystick, movement resumes immediately after reboot.
         }
     } else {
         const float dead=0.15f;
@@ -530,11 +659,7 @@ static void update(float dt) {
         const Vec3 move=add(mul(forward,-my),mul(right,mx));
 
         const float speed=3.6f;
-        px += move.x*speed*dt;
-        pz += move.z*speed*dt;
-
-        px=std::clamp(px,-18.0f,18.0f);
-        pz=std::clamp(pz,-18.0f,18.0f);
+        movePlayer(move.x*speed*dt,move.z*speed*dt);
 
         if(firePointer>=0 && heat<0.92f) {
             heat=std::min(1.0f,heat+dt*0.92f);
@@ -552,7 +677,7 @@ static void update(float dt) {
     enemyHitFlash=std::max(0.0f,enemyHitFlash-dt);
 
     // Laser hit test: horizontal ray against enemy's small collision sphere.
-    if(laserT>0.0f && enemyRespawn<=0.0f && respawnTimer<=0.0f) {
+    if(laserT>0.0f && firePointer>=0 && enemyRespawn<=0.0f && respawnTimer<=0.0f) {
         const Vec3 start=localOffset({px,0,pz},{0,1.45f,-1.70f},yaw);
         const float dirX=std::sin(yaw);
         const float dirZ=-std::cos(yaw);
@@ -624,9 +749,15 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             const float radius=h*0.20f;
             joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
-        } else if(!leftZone && firePointer<0) {
+        } else if(!leftZone && pointInFireButton(x,y,w,h) && firePointer<0) {
+            // Only a press inside the explicit FIRE button starts firing.
             firePointer=pointerId;
+            laserT=0.08f;
+        } else if(!leftZone && aimPointer<0) {
+            // Any other press on the right is an aim swipe, never a fire press.
+            aimPointer=pointerId;
             lastAimX=x;
+            lastAimY=y;
         }
         return;
     }
@@ -638,8 +769,18 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             const float radius=h*0.20f;
             joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
-        } else if(pointerId==firePointer) {
+        } else if(pointerId==aimPointer) {
             updateAim(x,y);
+        } else if(pointerId!=firePointer && !leftZone) {
+            // If a resumed finger sends MOVE after a death/reboot, allow it to
+            // reacquire its intended right-side control without requiring a tap.
+            if(pointInFireButton(x,y,w,h) && firePointer<0) {
+                firePointer=pointerId;
+            } else if(aimPointer<0) {
+                aimPointer=pointerId;
+                lastAimX=x;
+                lastAimY=y;
+            }
         }
         return;
     }
@@ -649,6 +790,9 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             movePointer=-1;
             joyX=0.0f;
             joyY=0.0f;
+        }
+        if(pointerId==aimPointer || action==ACTION_CANCEL) {
+            aimPointer=-1;
         }
         if(pointerId==firePointer || action==ACTION_CANCEL) {
             firePointer=-1;
