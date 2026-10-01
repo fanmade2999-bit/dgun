@@ -37,7 +37,7 @@ public final class MainActivity extends Activity {
             super(MainActivity.this);
             setEGLContextClientVersion(2);
             setPreserveEGLContextOnPause(true);
-            setRenderer(new Renderer());
+            setRenderer(new MainActivity.Renderer());
             setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
             setFocusable(true);
         }
@@ -53,7 +53,8 @@ public final class MainActivity extends Activity {
     }
 
     private static final class Renderer implements GLSurfaceView.Renderer {
-        @Override public void onSurfaceCreated(javax.microedition.khronos.egl.EGLConfig config) {
+        @Override public void onSurfaceCreated(javax.microedition.khronos.opengles.GL10 gl,
+                                                javax.microedition.khronos.egl.EGLConfig config) {
             NativeBridge.init();
         }
         @Override public void onSurfaceChanged(javax.microedition.khronos.opengles.GL10 gl, int w, int h) {
