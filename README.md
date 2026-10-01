@@ -1,43 +1,48 @@
-# DG Build 0003
+# DG Build 0004
 
-First playable Android combat slice with clarified touch controls and physical arena obstacles.
+Playable Android combat foundation for the Destroy Gunners-inspired persistent exploration project.
 
-## 0003 changes
+## 0004: remote-body / salvage foundation
 
-- **Blue bar = HEAT**, now explicitly labeled.
-- **Green bar = HP**, now explicitly labeled.
-- **MOVE** label for the left virtual joystick.
-- **AIM** label for the right-side aim area.
-- **FIRE** label and dedicated fire button on the lower-right.
-- Swiping in the AIM area **does not fire**.
-- Firing occurs only when the explicit FIRE control is pressed.
-- Proper simultaneous MOVE + AIM/FIRE multitouch remains supported.
-- Player collision against all current arena obstacle blocks.
-- Enemy collision against current arena obstacle blocks.
-- Aim pitch now responds to swipe delta instead of absolute screen position.
-- Player respawn no longer destroys the active movement pointer, so holding the joystick through a reboot does not permanently lock movement.
-- Firing is cleared on death so the mech does not automatically resume firing after reboot.
-- Android version bumped to 0.0.3 / versionCode 3.
+The player is treated as a remote consciousness rather than a permanently attached pilot.
+
+- The current mech is a physical **body** that can be destroyed and left behind.
+- The wreck remains at the death location.
+- Every major mech section has its own simplified hitbox/health state: core, head, left/right arm, left/right leg, weapon.
+- Damage is applied to individual parts instead of only a single invisible HP pool.
+- Wreck salvage quality is calculated from the surviving condition of the individual parts; severe damage reduces recoverable value disproportionately.
+- The HUD exposes the current number of spare assembled bodies.
+- On death, an available spare body is deployed from the home-base concept.
+- When the assembled-body pool is exhausted, the prototype switches to a small temporary recovery-bot body.
+- The foundation is ready for the later base system: land base or orbital/space base, component scarcity, fabrication time, deliberate body swapping, and recovery/deployment sequences.
+
+## Laser
+
+- The laser visual is restored and made more visible with a core beam, cheap glow lines, and a muzzle pulse.
+- Beam range and collision use the same trace.
+- Obstacles have material-specific penetration resistance.
+- Light debris can be pierced with reduced energy.
+- Dense concrete/industrial/metal barriers consume progressively more penetration.
+- A sufficiently resistant obstacle stops the beam.
+- Targets behind penetrable obstacles receive reduced laser damage according to remaining beam energy.
 
 ## Controls
 
-**MOVE:** hold/drag the left circular control.
+**MOVE:** hold/drag the left virtual joystick.
 
-**AIM:** swipe anywhere in the right-side area above/away from the FIRE button.
+**AIM:** swipe in the right-side aim area.
 
-**FIRE:** press and hold the lower-right FIRE button.
+**FIRE:** press and hold the dedicated lower-right FIRE button.
 
-MOVE + AIM + FIRE can be used together with multiple fingers.
+MOVE + AIM + FIRE can be used together.
 
-## Intended direction
+## What remains prototype-level
 
-0004: equipment/components system and UNKNOWN EQUIPMENT discovery.
-0005: first explorable facility and persistent world save.
-Later: world generation, named facilities, bosses, rare/iconic equipment, and the persistent exploration loop.
+The current body system is a gameplay foundation, not the final inventory/base UI. Body construction scarcity, fabrication timers, body swapping, physical wreck harvesting, component-by-component salvage inventory, land/space base transitions, and mini-bot deployment animation will be expanded as persistent-world systems.
 
 ## Build / test
 
-Manus is monitoring the source and handling compilation.
+Manus monitors the source and compiles the Android build.
 
 Verification loop:
-source change -> Manus compile -> Android emulator QA -> physical-device test -> performance profiling.
+source -> Manus compile -> Android emulator QA -> physical-device test -> performance profiling.
