@@ -651,6 +651,16 @@ static uint8_t glyphBits(char ch,int row) {
     static constexpr uint8_t L[7] = {16,16,16,16,16,16,31};
     static constexpr uint8_t G[7] = {14,17,16,23,17,17,14};
     static constexpr uint8_t N[7] = {17,25,21,19,17,17,17};
+    static constexpr uint8_t D0[7] = {14,17,19,21,25,17,14};
+    static constexpr uint8_t D1[7] = {4,12,4,4,4,4,14};
+    static constexpr uint8_t D2[7] = {14,17,1,2,4,8,31};
+    static constexpr uint8_t D3[7] = {30,1,1,14,1,1,30};
+    static constexpr uint8_t D4[7] = {2,6,10,18,31,2,2};
+    static constexpr uint8_t D5[7] = {31,16,16,30,1,1,30};
+    static constexpr uint8_t D6[7] = {14,16,16,30,17,17,14};
+    static constexpr uint8_t D7[7] = {31,1,2,4,8,8,8};
+    static constexpr uint8_t D8[7] = {14,17,17,14,17,17,14};
+    static constexpr uint8_t D9[7] = {14,17,17,15,1,1,14};
 
     if(row<0 || row>=7) return 0;
     switch(ch) {
@@ -673,6 +683,16 @@ static uint8_t glyphBits(char ch,int row) {
         case 'L': return L[row];
         case 'G': return G[row];
         case 'N': return N[row];
+        case '0': return D0[row];
+        case '1': return D1[row];
+        case '2': return D2[row];
+        case '3': return D3[row];
+        case '4': return D4[row];
+        case '5': return D5[row];
+        case '6': return D6[row];
+        case '7': return D7[row];
+        case '8': return D8[row];
+        case '9': return D9[row];
         default: return 0;
     }
 }
