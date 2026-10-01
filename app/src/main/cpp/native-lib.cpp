@@ -124,8 +124,86 @@ static GLint uColor=-1;
 static GLuint cubeVbo=0;
 static int viewportW=1, viewportH=1;
 
+static constexpr float WORLD_SIZE=128.0f;
+static constexpr float WORLD_HALF=WORLD_SIZE*0.5f;
+static constexpr float WORLD_TILE_SIZE=2.0f;
+static constexpr int WORLD_TILE_COUNT=int(WORLD_SIZE/WORLD_TILE_SIZE);
+
 static float px=0.0f, pz=0.0f;
 static float yaw=0.0f, aimPitch=0.18f;
+
+static float wrapWorld(float v) {
+    while(v>=WORLD_HALF) v-=WORLD_SIZE;
+    while(v< -WORLD_HALF) v+=WORLD_SIZE;
+    return v;
+}
+
+static float wrappedDelta(float from, float to) {
+    float d=to-from;
+    if(d>WORLD_HALF) d-=WORLD_SIZE;
+    if(d< -WORLD_HALF) d+=WORLD_SIZE;
+    return d;
+}
+
+static int floorTile(float v) {
+    return int(std::floor(v/WORLD_TILE_SIZE));
+}
+
+static int positiveMod(int v,int m) {
+    const int r=v%m;
+    return r<0?r+m:r;
+}
+
+static uint32_t worldHash(int tx,int tz) {
+    const uint32_t x=uint32_t(positiveMod(tx,WORLD_TILE_COUNT));
+    const uint32_t z=uint32_t(positiveMod(tz,WORLD_TILE_COUNT));
+    uint32_t h=2166136261u;
+    h^=x+0x9e3779b9u; h*=16777619u;
+    h^=z+0x85ebca6bu; h*=16777619u;
+    h^=(x<<16)|(z&0xffffu); h*=16777619u;
+    h^=h>>13; h*=1274126177u; h^=h>>16;
+    return h;
+}
+
+static float tileHeight(int tx,int tz) {
+    const uint32_t h=worldHash(tx,tz);
+    const int band=int((h>>5)&0x0fu);
+    if(band<3) return 0.08f;
+    if(band>12) return 0.30f;
+    return 0.16f;
+}
+
+static bool proceduralSolidTile(int tx,int tz) {
+    const uint32_t h=worldHash(tx,tz);
+    const int biome=int((h>>9)&0x0fu);
+    // Sparse deterministic ruins/rock clusters. The exact world repeats only
+    // after the full torus circumference, while the local view is generated
+    // on demand from wrapped tile coordinates.
+    if(biome<2) return true;
+    if(((h>>17)&0xffu)==0x2au) return true;
+    return false;
+}
+
+static bool nearPoint(float x,float z,float tx,float tz,float radius);
+
+static bool proceduralSolidAt(float x,float z) {
+    const int tx=floorTile(x);
+    const int tz=floorTile(z);
+    const float centerX=(float(tx)+0.5f)*WORLD_TILE_SIZE;
+    const float centerZ=(float(tz)+0.5f)*WORLD_TILE_SIZE;
+    const float dx=wrappedDelta(x,centerX);
+    const float dz=wrappedDelta(z,centerZ);
+    if(std::fabs(dx)>0.92f || std::fabs(dz)>0.92f) return false;
+
+    // Keep the key test landmarks navigable.
+    if(nearPoint(x,z,BASE_X,BASE_Z,4.0f)
+        || nearPoint(x,z,FACILITY_X,FACILITY_Z,4.0f)
+        || nearPoint(x,z,BOSS_X,BOSS_Z,4.0f)) {
+        return false;
+    }
+
+    return proceduralSolidTile(tx,tz);
+}
 
 static float heat=0.0f;
 static float playerHp=100.0f;
@@ -375,6 +453,52 @@ static void drawLines(const Mat4& vp, const float* verts, int count,
     glDrawArrays(GL_LINES,0,count);
 }
 
+static void drawProceduralTerrain(const Mat4& vp) {
+    const int centerTx=floorTile(px);
+    const int centerTz=floorTile(pz);
+    constexpr int R=10;
+
+    for(int oz=-R;oz<=R;oz++) {
+        for(int ox=-R;ox<=R;ox++) {
+            const int tx=centerTx+ox;
+            const int tz=centerTz+oz;
+            const float centerX=(float(tx)+0.5f)*WORLD_TILE_SIZE;
+            const float centerZ=(float(tz)+0.5f)*WORLD_TILE_SIZE;
+            const float localX=px + float(ox + (centerTx-floorTile(px))) * WORLD_TILE_SIZE;
+            const float localZ=pz + float(oz + (centerTz-floorTile(pz))) * WORLD_TILE_SIZE;
+            const uint32_t h=worldHash(tx,tz);
+
+            // Skip most tiles to keep the draw cost low, but vary all visible
+            // ground pieces deterministically so the world reads as generated.
+            const int biome=int((h>>9)&0x0fu);
+            const float y=tileHeight(tx,tz)-0.10f;
+
+            float r=0.07f + 0.02f*float((h>>1)&7u);
+            float g=0.10f + 0.025f*float((h>>4)&7u);
+            float b=0.11f + 0.020f*float((h>>7)&7u);
+            if(biome<3) {
+                r*=0.70f; g*=0.90f; b*=1.12f;
+            } else if(biome>12) {
+                r*=1.35f; g*=0.92f; b*=0.72f;
+            }
+
+            // Use the player-relative placement so the seam never exposes an
+            // artificial empty strip when X/Z wrap from +64 to -64.
+            drawCube(vp,{localX,y,localZ},{0.96f,0.08f+tileHeight(tx,tz)*0.20f,0.96f},
+                     float((h>>22)&3u)*0.5f,r,g,b);
+
+            if(proceduralSolidTile(tx,tz)) {
+                const float top=0.25f+0.25f*float((h>>24)&3u);
+                drawCube(vp,{localX,top,localZ},{0.60f,top,0.60f},
+                         float((h>>18)&3u)*0.4f,
+                         0.12f+0.03f*float((h>>26)&3u),
+                         0.14f+0.03f*float((h>>28)&3u),
+                         0.15f+0.02f*float((h>>30)&3u));
+            }
+        }
+    }
+}
+
 static void drawGrid(const Mat4& vp) {
     static float lines[41*2*2*3];
     static bool ready=false;
@@ -573,43 +697,58 @@ static constexpr ObstacleBox OBSTACLES[] = {
 };
 
 static bool collidesObstacle(float x, float z, float radius) {
+    const float wrappedX=wrapWorld(x);
+    const float wrappedZ=wrapWorld(z);
+
+    // Procedural solids live on the toroidal tile field.
+    if(proceduralSolidAt(wrappedX,wrappedZ)) return true;
+
     for (const auto& b : OBSTACLES) {
-        const float cx = std::clamp(x,b.minX,b.maxX);
-        const float cz = std::clamp(z,b.minZ,b.maxZ);
-        const float dx = x-cx;
-        const float dz = z-cz;
-        if (dx*dx+dz*dz < radius*radius) return true;
+        // Test the obstacle in the nearest torus image. This keeps collision
+        // correct even when the player approaches a landmark across the seam.
+        const float obstacleX=wrapWorld((b.minX+b.maxX)*0.5f);
+        const float obstacleZ=wrapWorld((b.minZ+b.maxZ)*0.5f);
+        const float halfX=(b.maxX-b.minX)*0.5f;
+        const float halfZ=(b.maxZ-b.minZ)*0.5f;
+        const float centerDx=wrappedDelta(wrappedX,obstacleX);
+        const float centerDz=wrappedDelta(wrappedZ,obstacleZ);
+        const float cx=std::clamp(centerDx,-halfX,halfX);
+        const float cz=std::clamp(centerDz,-halfZ,halfZ);
+        const float dx=centerDx-cx;
+        const float dz=centerDz-cz;
+        if(dx*dx+dz*dz<radius*radius) return true;
     }
+
     return false;
 }
 
 static void movePlayer(float dx, float dz) {
-    const float nextX = std::clamp(px+dx,-18.0f,18.0f);
-    if (!collidesObstacle(nextX,pz,PLAYER_RADIUS)) {
+    const float nextX=wrapWorld(px+dx);
+    if(!collidesObstacle(nextX,pz,PLAYER_RADIUS)) {
         px=nextX;
     }
 
-    const float nextZ = std::clamp(pz+dz,-18.0f,18.0f);
-    if (!collidesObstacle(px,nextZ,PLAYER_RADIUS)) {
+    const float nextZ=wrapWorld(pz+dz);
+    if(!collidesObstacle(px,nextZ,PLAYER_RADIUS)) {
         pz=nextZ;
     }
 }
 
 static void moveEnemy(float dx, float dz) {
-    const float nextX = std::clamp(enemyX+dx,-18.0f,18.0f);
-    if (!collidesObstacle(nextX,enemyZ,0.65f)) {
+    const float nextX=wrapWorld(enemyX+dx);
+    if(!collidesObstacle(nextX,enemyZ,0.65f)) {
         enemyX=nextX;
     }
 
-    const float nextZ = std::clamp(enemyZ+dz,-18.0f,18.0f);
-    if (!collidesObstacle(enemyX,nextZ,0.65f)) {
+    const float nextZ=wrapWorld(enemyZ+dz);
+    if(!collidesObstacle(enemyX,nextZ,0.65f)) {
         enemyZ=nextZ;
     }
 }
 
 static bool nearPoint(float x,float z,float tx,float tz,float radius) {
-    const float dx=x-tx;
-    const float dz=z-tz;
+    const float dx=wrappedDelta(x,tx);
+    const float dz=wrappedDelta(z,tz);
     return dx*dx+dz*dz<=radius*radius;
 }
 
@@ -877,6 +1016,7 @@ static uint8_t glyphBits(char ch,int row) {
     static constexpr uint8_t G[7] = {14,17,16,23,17,17,14};
     static constexpr uint8_t N[7] = {17,25,21,19,17,17,17};
     static constexpr uint8_t C[7] = {14,17,16,16,16,17,14};
+    static constexpr uint8_t X[7] = {17,10,4,4,10,17,17};
     static constexpr uint8_t D0[7] = {14,17,19,21,25,17,14};
     static constexpr uint8_t D1[7] = {4,12,4,4,4,4,14};
     static constexpr uint8_t D2[7] = {14,17,1,2,4,8,31};
@@ -911,6 +1051,7 @@ static uint8_t glyphBits(char ch,int row) {
         case 'G': return G[row];
         case 'N': return N[row];
         case 'C': return C[row];
+        case 'X': return X[row];
         case '0': return D0[row];
         case '1': return D1[row];
         case '2': return D2[row];
@@ -1183,6 +1324,18 @@ static void drawHud() {
                    0.70f,0.86f,0.92f,0.75f);
     }
 
+    // Canonical wrapped world coordinates make the finite circumference visible
+    // while still letting the player traverse indefinitely through the seam.
+    char xText[32]{};
+    char zText[32]{};
+    std::snprintf(xText,sizeof(xText),"X%d",(int)std::round(wrapWorld(px)));
+    std::snprintf(zText,sizeof(zText),"X%d",(int)std::round(wrapWorld(pz)));
+    drawText2D(hud,xText,viewportW*0.02f,viewportH*0.92f,2.6f,
+               0.72f,0.86f,0.92f,0.80f);
+    drawText2D(hud,zText,viewportW*0.10f,viewportH*0.92f,2.6f,
+               0.72f,0.86f,0.92f,0.80f);
+
+
     // Context hint: the ACT button only does something when a relevant
     // interaction is nearby.
     if(nearPoint(px,pz,wreck.x,wreck.z,2.0f) && wreck.active) {
@@ -1424,8 +1577,8 @@ static void updateEnemy(float dt) {
         return;
     }
 
-    const float dx=px-enemyX;
-    const float dz=pz-enemyZ;
+    const float dx=wrappedDelta(enemyX,px);
+    const float dz=wrappedDelta(enemyZ,pz);
     const float distance=std::sqrt(std::max(0.0001f,dx*dx+dz*dz));
 
     enemyYaw=std::atan2(dx,-dz);
@@ -1477,15 +1630,15 @@ static void updateEnemy(float dt) {
 static void updateBoss(float dt) {
     if(bossDefeated) return;
 
-    const float dx=px-bossX;
-    const float dz=pz-bossZ;
+    const float dx=wrappedDelta(bossX,px);
+    const float dz=wrappedDelta(bossZ,pz);
     const float distance=std::sqrt(std::max(0.0001f,dx*dx+dz*dz));
     bossYaw=std::atan2(dx,-dz);
 
     if(distance>7.0f) {
         const float speed=0.72f;
-        const float nx=std::clamp(bossX+(dx/distance)*speed*dt,-16.5f,16.5f);
-        const float nz=std::clamp(bossZ+(dz/distance)*speed*dt,-16.5f,16.5f);
+        const float nx=wrapWorld(bossX+(dx/distance)*speed*dt);
+        const float nz=wrapWorld(bossZ+(dz/distance)*speed*dt);
         if(!collidesObstacle(nx,bossZ,1.25f)) bossX=nx;
         if(!collidesObstacle(bossX,nz,1.25f)) bossZ=nz;
     }
@@ -1533,8 +1686,8 @@ static void update(float dt) {
         firePointer=-1;
 
         if(respawnTimer<=0.0f) {
-            px=0.0f;
-            pz=0.0f;
+            px=wrapWorld(BASE_X);
+            pz=wrapWorld(BASE_Z);
             yaw=0.0f;
             aimPitch=0.18f;
 
@@ -1687,6 +1840,7 @@ static void frame() {
     };
     const Mat4 vp=mulM(proj,lookAt(eye,target,{0,1,0}));
 
+    drawProceduralTerrain(vp);
     drawGrid(vp);
     drawArenaBlocks(vp);
     drawTestWorldStructures(vp);
