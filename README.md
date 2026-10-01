@@ -1,4 +1,4 @@
-# DG Build 0006
+# DG Build 0007
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
@@ -45,6 +45,13 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Close to the facility + ACT identifies the unknown equipment.
 - This is intentionally location-driven rather than random-stat spam.
 
+### Landmark boss + equipment progression
+- A large persistent boss now lives at a fixed world landmark.
+- Boss has its own HP, movement pressure, attack cycle, hit flash and laser.
+- Defeating the boss is a one-time progression event: it adds UNKNOWN EQUIPMENT plus SCRAP/CIRCUIT.
+- Visiting the discovery facility identifies an UNKNOWN EQUIPMENT piece.
+- The first identified pieces unlock/upgrade the **LANCE** laser and immediately change fire damage/heat behavior.
+
 ### Body fabrication
 - At the base + ACT starts fabrication when the required resources and an empty body slot exist.
 - Current test recipe: 6 SCRAP + 2 CIRCUIT.
@@ -59,16 +66,18 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 4. Let the current chassis reach zero HP. Confirm the wreck remains where the fight happened.
 5. Return to/approach the wreck and press **ACT**. Confirm SCRAP/CIRCUIT resources increase according to the wreck's surviving parts.
 6. Travel to the discovery facility and press **ACT** beside the unknown pod. Confirm the unknown equipment is identified.
-7. Return to base. With an empty body slot and sufficient salvaged resources, press **ACT** and watch the fabrication timer.
-8. After fabrication, press **SWAP** and confirm the newly fabricated body is available.
-9. Exhaust all assembled bodies through deaths and confirm the game falls back to the temporary recovery bot.
+7. Travel to the boss landmark and defeat the boss. Confirm it stays defeated and a new UNKNOWN EQUIPMENT piece appears in the progression HUD.
+8. Visit the discovery facility and press **ACT** again. Confirm the LANCE level increases and the laser behavior changes.
+9. Return to base. With an empty body slot and sufficient resources, press **ACT** and watch the fabrication timer.
+10. After fabrication, press **SWAP** and confirm the newly fabricated body is available.
+11. Exhaust all assembled bodies through deaths and confirm the game falls back to the temporary recovery bot.
 
 ## Architecture direction
 
 The prototype now has the core shape of:
 **remote consciousness -> physical body -> localized damage -> abandoned wreck -> salvage -> scarce components -> fabrication -> replacement body -> continued exploration**
 
-Land vs orbital base, persistent saves, large procedural world, named facilities, boss landmarks, equipment rarity/identity, and deeper salvage/component inventories remain later systems.
+Land vs orbital base, persistent saves, large procedural world, named facilities beyond the test site, more boss variants, equipment rarity/identity beyond the prototype LANCE path, and deeper salvage/component inventories remain later systems.
 
 ## Build / test
 
