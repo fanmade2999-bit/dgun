@@ -176,9 +176,36 @@ static BodyPartState playerParts[PART_COUNT] = {
     {10.0f,10.0f}
 };
 
-static int spareBodies=2;
+static constexpr int MAX_BODY_SLOTS=6;
+
+struct StoredBody {
+    bool occupied=false;
+    BodyPartState parts[PART_COUNT]{};
+    int generation=0;
+};
+
+static StoredBody bodySlots[MAX_BODY_SLOTS]{};
+static int activeBodySlot=0;
 static int bodyGeneration=1;
+static bool bodyPoolInitialized=false;
 static bool miniBotMode=false;
+
+// Test-world resources and progression.
+static int scrap=3;
+static int circuits=1;
+static int unknownEquipment=1;
+static int identifiedEquipment=0;
+
+static float fabricationTimer=0.0f;
+static int fabricationSlot=-1;
+
+static constexpr float BASE_X=0.0f;
+static constexpr float BASE_Z=0.0f;
+static constexpr float FACILITY_X=11.0f;
+static constexpr float FACILITY_Z=-6.0f;
+
+static bool actionPointerActive=false;
+static int actionPointer=-1;
 
 struct WreckState {
     bool active=false;
@@ -293,6 +320,7 @@ static void initGL() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     glClearColor(0.025f,0.035f,0.05f,1.0f);
+    initializeBodyPool();
 }
 
 static void drawCube(
@@ -369,7 +397,7 @@ static constexpr BeamObstacle BEAM_OBSTACLES[] = {
 };
 
 static constexpr float LASER_PENETRATION=2.20f;
-static constexpr float LASER_MAX_RANGE=16.0f;
+static constexpr float LASER_MAX_RANGE=18.0f;
 
 static float rayBoxEntryDistance(Vec3 start, Vec3 dir, const BeamObstacle& b) {
     float tmin=0.0f;
@@ -461,25 +489,41 @@ static void drawMech(const Mat4& vp) {
     drawCube(vp,localOffset({px,0,pz},{0,1.85f,-0.03f},yaw),
              {0.42f,0.34f,0.42f},yaw,0.22f,0.46f,0.70f);
 
+    auto partTint=[](int part,float r,float g,float b)->Vec3 {
+        const float frac=PLAYER_PART_DEFS[part].maxHp>0.0f
+            ? std::clamp(playerParts[part].hp/PLAYER_PART_DEFS[part].maxHp,0.0f,1.0f)
+            : 0.0f;
+        const float factor=0.32f+0.68f*frac;
+        return {r*factor,g*factor,b*factor};
+    };
+
+    const Vec3 lShoulder=partTint(PART_LEFT_ARM,0.12f,0.28f,0.43f);
+    const Vec3 rShoulder=partTint(PART_RIGHT_ARM,0.12f,0.28f,0.43f);
+    const Vec3 lArm=partTint(PART_LEFT_ARM,0.10f,0.23f,0.36f);
+    const Vec3 rArm=partTint(PART_RIGHT_ARM,0.10f,0.23f,0.36f);
+    const Vec3 lLeg=partTint(PART_LEFT_LEG,0.12f,0.23f,0.32f);
+    const Vec3 rLeg=partTint(PART_RIGHT_LEG,0.12f,0.23f,0.32f);
+    const Vec3 weapon=partTint(PART_WEAPON,0.38f,0.55f,0.78f);
+
     // Shoulders and arms.
     drawCube(vp,localOffset({px,0,pz},{-1.05f,1.05f,0.0f},yaw),
-             {0.30f,0.40f,0.42f},yaw,0.12f,0.28f,0.43f);
+             {0.30f,0.40f,0.42f},yaw,lShoulder.x,lShoulder.y,lShoulder.z);
     drawCube(vp,localOffset({px,0,pz},{1.05f,1.05f,0.0f},yaw),
-             {0.30f,0.40f,0.42f},yaw,0.12f,0.28f,0.43f);
+             {0.30f,0.40f,0.42f},yaw,rShoulder.x,rShoulder.y,rShoulder.z);
     drawCube(vp,localOffset({px,0,pz},{-1.08f,0.40f,0.0f},yaw),
-             {0.28f,0.48f,0.30f},yaw,0.10f,0.23f,0.36f);
+             {0.28f,0.48f,0.30f},yaw,lArm.x,lArm.y,lArm.z);
     drawCube(vp,localOffset({px,0,pz},{1.08f,0.40f,0.0f},yaw),
-             {0.28f,0.48f,0.30f},yaw,0.10f,0.23f,0.36f);
+             {0.28f,0.48f,0.30f},yaw,rArm.x,rArm.y,rArm.z);
 
     // Legs.
     drawCube(vp,localOffset({px,0,pz},{-0.40f,-0.10f,0.0f},yaw),
-             {0.30f,0.60f,0.38f},yaw,0.12f,0.23f,0.32f);
+             {0.30f,0.60f,0.38f},yaw,lLeg.x,lLeg.y,lLeg.z);
     drawCube(vp,localOffset({px,0,pz},{0.40f,-0.10f,0.0f},yaw),
-             {0.30f,0.60f,0.38f},yaw,0.12f,0.23f,0.32f);
+             {0.30f,0.60f,0.38f},yaw,rLeg.x,rLeg.y,rLeg.z);
 
     // Main laser cannon mounted at the front.
     drawCube(vp,localOffset({px,0,pz},{0,1.45f,-0.95f},yaw),
-             {0.13f,0.13f,0.85f},yaw,0.38f,0.55f,0.78f);
+             {0.13f,0.13f,0.85f},yaw,weapon.x,weapon.y,weapon.z);
 }
 
 struct ObstacleBox {
@@ -529,6 +573,64 @@ static void moveEnemy(float dx, float dz) {
     }
 }
 
+static bool nearPoint(float x,float z,float tx,float tz,float radius) {
+    const float dx=x-tx;
+    const float dz=z-tz;
+    return dx*dx+dz*dz<=radius*radius;
+}
+
+static bool pointInActionButton(float x,float y,float w,float h) {
+    const float cx=w*0.68f;
+    const float cy=h*0.78f;
+    const float radius=h*0.115f;
+    const float dx=x-cx, dy=y-cy;
+    return dx*dx+dy*dy<=radius*radius;
+}
+
+static bool performContextAction() {
+    if(nearPoint(px,pz,wreck.x,wreck.z,2.0f) && wreck.active) {
+        // Salvage is intentionally condition-dependent: destroyed parts yield
+        // little, intact parts yield much more. Recovery is a conversion into
+        // components; later this becomes a proper salvage inventory UI.
+        int recoveredScrap=0;
+        int recoveredCircuits=0;
+
+        for(int i=0;i<PART_COUNT;i++) {
+            const BodyPartDef& d=PLAYER_PART_DEFS[i];
+            const float frac=d.maxHp>0.0f
+                ? std::clamp(wreck.parts[i].hp/d.maxHp,0.0f,1.0f)
+                : 0.0f;
+
+            if(frac>0.03f) {
+                recoveredScrap += 1 + int(std::floor(frac*3.0f));
+                if(i==PART_CORE || i==PART_WEAPON || frac>0.75f) {
+                    recoveredCircuits += 1;
+                }
+            }
+        }
+
+        scrap+=recoveredScrap;
+        circuits+=recoveredCircuits;
+        wreck.active=false;
+        wreck.salvagePercent=0.0f;
+        return true;
+    }
+
+    if(nearPoint(px,pz,FACILITY_X,FACILITY_Z,2.6f) && unknownEquipment>0) {
+        // Identification is deliberately location-driven instead of pure RNG:
+        // the facility reveals one hidden piece of equipment.
+        --unknownEquipment;
+        ++identifiedEquipment;
+        return true;
+    }
+
+    if(nearPoint(px,pz,BASE_X,BASE_Z,2.8f)) {
+        return beginFabrication();
+    }
+
+    return false;
+}
+
 static bool pointInFireButton(float x, float y, float w, float h) {
     const float cx=w*0.84f;
     const float cy=h*0.78f;
@@ -571,26 +673,28 @@ static void drawLaser(const Mat4& vp) {
 
     const Vec3 end=add(start,mul(dir,visibleDistance));
 
-    // Three very cheap lines make the laser much more visible on devices where
-    // glLineWidth() is effectively fixed at one pixel.
+    // Multiple cheap lines make the beam visibly persistent even on GLES
+    // implementations that clamp glLineWidth() to a single pixel.
     const float mainVerts[]={
         start.x,start.y,start.z,
         end.x,end.y,end.z
     };
     drawLines(vp,mainVerts,2,0.25f,0.95f,1.0f,0.98f);
 
-    const Vec3 side={0.018f,0.0f,0.018f};
-    const float glowVertsA[]={
-        start.x-side.x,start.y+side.y,start.z-side.z,
-        end.x-side.x,end.y+side.y,end.z-side.z
+    const float offsets[][2]={
+        {-0.030f,-0.030f},
+        { 0.030f, 0.030f},
+        {-0.045f, 0.000f},
+        { 0.045f, 0.000f}
     };
-    const float glowVertsB[]={
-        start.x+side.x,start.y-side.y,start.z+side.z,
-        end.x+side.x,end.y-side.y,end.z+side.z
-    };
-    const float glow=0.20f+0.35f*trace.energy;
-    drawLines(vp,glowVertsA,2,0.05f,0.55f,0.90f,glow);
-    drawLines(vp,glowVertsB,2,0.05f,0.55f,0.90f,glow);
+    const float glow=0.22f+0.36f*trace.energy;
+    for(const auto& o:offsets) {
+        const float glowVerts[]={
+            start.x+o[0],start.y,start.z+o[1],
+            end.x+o[0],end.y,end.z+o[1]
+        };
+        drawLines(vp,glowVerts,2,0.05f,0.55f,0.90f,glow);
+    }
 
     // Small muzzle pulse.
     const float pulse=0.10f+0.12f*std::sin(float(nowSeconds()*60.0));
@@ -665,6 +769,7 @@ static uint8_t glyphBits(char ch,int row) {
     static constexpr uint8_t L[7] = {16,16,16,16,16,16,31};
     static constexpr uint8_t G[7] = {14,17,16,23,17,17,14};
     static constexpr uint8_t N[7] = {17,25,21,19,17,17,17};
+    static constexpr uint8_t C[7] = {14,17,16,16,16,17,14};
     static constexpr uint8_t D0[7] = {14,17,19,21,25,17,14};
     static constexpr uint8_t D1[7] = {4,12,4,4,4,4,14};
     static constexpr uint8_t D2[7] = {14,17,1,2,4,8,31};
@@ -697,6 +802,7 @@ static uint8_t glyphBits(char ch,int row) {
         case 'L': return L[row];
         case 'G': return G[row];
         case 'N': return N[row];
+        case 'C': return C[row];
         case '0': return D0[row];
         case '1': return D1[row];
         case '2': return D2[row];
@@ -744,6 +850,26 @@ static void drawText2D(const Mat4& hud,const char* text,float x,float y,
     glUniformMatrix4fv(uMvp,1,GL_FALSE,hud.m);
     glUniform4f(uColor,r,g,b,a);
     glDrawArrays(GL_TRIANGLES,0,n/3);
+}
+
+static void drawTestWorldStructures(const Mat4& vp) {
+    // Home base: a simple four-block fabrication bay.
+    drawCube(vp,{BASE_X,0.85f,BASE_Z},{2.0f,0.85f,2.0f},0.0f,
+             0.13f,0.24f,0.33f);
+    drawCube(vp,{BASE_X,2.0f,BASE_Z},{1.0f,0.25f,1.0f},0.0f,
+             0.26f,0.55f,0.70f);
+
+    // Discovery facility.
+    drawCube(vp,{FACILITY_X,1.0f,FACILITY_Z},{1.5f,1.0f,1.5f},0.1f,
+             0.26f,0.20f,0.14f);
+    drawCube(vp,{FACILITY_X,2.25f,FACILITY_Z},{0.75f,0.25f,0.75f},0.1f,
+             0.50f,0.34f,0.12f);
+
+    // Unknown equipment pod outside the facility.
+    if(unknownEquipment>0) {
+        drawCube(vp,{FACILITY_X+2.0f,0.35f,FACILITY_Z},{0.30f,0.35f,0.30f},0.2f,
+                 0.34f,0.52f,0.65f);
+    }
 }
 
 static void drawWreck(const Mat4& vp) {
@@ -835,6 +961,18 @@ static void drawHud() {
     const float aimLabelY=viewportH*0.17f;
     drawText2D(hud,"AIM",aimLabelX,aimLabelY,3.0f,0.70f,0.86f,0.96f,0.70f);
 
+    // Context action button: salvage at a wreck, identify at a facility,
+    // fabricate at base when enough components are available.
+    const float actionX=viewportW*0.68f;
+    const float actionY=viewportH*0.78f;
+    const float actionR=viewportH*0.115f;
+    drawCircle2D(hud,actionX,actionY,actionR,
+                 actionPointer>=0?0.55f:0.42f,
+                 actionPointer>=0?0.86f:0.58f,
+                 actionPointer>=0?0.55f:0.50f,
+                 actionPointer>=0?0.85f:0.48f);
+    drawText2D(hud,"ACT",actionX-22.0f,actionY-10.0f,3.0f,1.0f,1.0f,1.0f,0.95f);
+
     // Explicit fire button. Swiping elsewhere on the right no longer fires.
     const float fireX=viewportW*0.84f;
     const float fireY=viewportH*0.78f;
@@ -853,8 +991,25 @@ static void drawHud() {
     std::snprintf(bodyText,sizeof(bodyText),"BODY");
     drawText2D(hud,bodyText,bodyX,bodyY,3.0f,0.70f,0.88f,0.96f,0.82f);
     char countText[8]{};
-    std::snprintf(countText,sizeof(countText),"%d",spareBodies);
+    std::snprintf(countText,sizeof(countText),"%d",countReadyBodies());
     drawText2D(hud,countText,bodyX+35.0f,bodyY,3.0f,1.0f,1.0f,1.0f,0.95f);
+
+    char resText[32]{};
+    std::snprintf(resText,sizeof(resText),"%d %d",scrap,circuits);
+    drawText2D(hud,resText,viewportW*0.47f,pad+12.0f,2.8f,
+               0.75f,0.88f,0.92f,0.90f);
+
+    char eqText[32]{};
+    std::snprintf(eqText,sizeof(eqText),"%d",identifiedEquipment);
+    drawText2D(hud,eqText,viewportW*0.59f,pad+12.0f,2.8f,
+               0.98f,0.86f,0.35f,0.95f);
+
+    if(fabricationTimer>0.0f) {
+        char fabText[32]{};
+        std::snprintf(fabText,sizeof(fabText),"%.0f",std::ceil(fabricationTimer));
+        drawText2D(hud,fabText,viewportW*0.47f,pad+44.0f,3.0f,
+                   0.65f,0.92f,0.98f,0.95f);
+    }
 
     if(wreck.active) {
         char salvage[32]{};
@@ -870,6 +1025,19 @@ static void drawHud() {
     if(miniBotMode) {
         drawText2D(hud,"BOT",viewportW*0.47f,viewportH*0.80f,3.0f,
                    0.70f,0.86f,0.92f,0.75f);
+    }
+
+    // Context hint: the ACT button only does something when a relevant
+    // interaction is nearby.
+    if(nearPoint(px,pz,wreck.x,wreck.z,2.0f) && wreck.active) {
+        drawText2D(hud,"SALVAGE",viewportW*0.34f,viewportH*0.18f,2.6f,
+                   0.80f,0.92f,0.80f,0.82f);
+    } else if(nearPoint(px,pz,FACILITY_X,FACILITY_Z,2.6f) && unknownEquipment>0) {
+        drawText2D(hud,"IDENTIFY",viewportW*0.36f,viewportH*0.18f,2.6f,
+                   0.80f,0.90f,0.98f,0.82f);
+    } else if(nearPoint(px,pz,BASE_X,BASE_Z,2.8f) && fabricationSlot<0) {
+        drawText2D(hud,"BODY",viewportW*0.42f,viewportH*0.18f,2.6f,
+                   0.75f,0.88f,0.96f,0.82f);
     }
 
     glEnable(GL_DEPTH_TEST);
@@ -923,6 +1091,120 @@ static float calculatePlayerHp() {
     return maxTotal>0.0f ? total*100.0f/maxTotal : 0.0f;
 }
 
+static void saveActiveBodyToPool() {
+    StoredBody& b=bodySlots[activeBodySlot];
+    b.occupied=true;
+    b.generation=bodyGeneration;
+    for(int i=0;i<PART_COUNT;i++) b.parts[i]=playerParts[i];
+}
+
+static void loadBodyFromSlot(int slot) {
+    activeBodySlot=slot;
+    StoredBody& b=bodySlots[slot];
+    b.occupied=true;
+    if(b.generation<=0) {
+        b.generation=++bodyGeneration;
+    } else {
+        bodyGeneration=b.generation;
+    }
+    for(int i=0;i<PART_COUNT;i++) {
+        playerParts[i]=b.parts[i];
+    }
+    playerHp=calculatePlayerHp();
+    chassisIntegrity=playerHp;
+    heat=0.0f;
+    aimPitch=0.0f;
+}
+
+static int countReadyBodies() {
+    int count=0;
+    for(int i=0;i<MAX_BODY_SLOTS;i++) {
+        if(i==activeBodySlot) continue;
+        if(bodySlots[i].occupied) count++;
+    }
+    return count;
+}
+
+static int findOtherBodySlot() {
+    for(int i=0;i<MAX_BODY_SLOTS;i++) {
+        if(i!=activeBodySlot && bodySlots[i].occupied) return i;
+    }
+    return -1;
+}
+
+static int findEmptyBodySlot() {
+    for(int i=0;i<MAX_BODY_SLOTS;i++) {
+        if(!bodySlots[i].occupied) return i;
+    }
+    return -1;
+}
+
+static void initializeBodyPool() {
+    if(bodyPoolInitialized) return;
+    bodyPoolInitialized=true;
+
+    for(int i=0;i<MAX_BODY_SLOTS;i++) {
+        bodySlots[i]=StoredBody{};
+    }
+
+    resetPlayerBody();
+
+    // Three initially assembled chassis make the scarcity/fabrication loop
+    // testable without making the first run punishing.
+    bodySlots[0].occupied=true;
+    bodySlots[0].generation=1;
+    for(int p=0;p<PART_COUNT;p++) bodySlots[0].parts[p]=playerParts[p];
+
+    for(int slot=1;slot<=2;slot++) {
+        bodySlots[slot].occupied=true;
+        bodySlots[slot].generation=slot+1;
+        for(int p=0;p<PART_COUNT;p++) bodySlots[slot].parts[p]=playerParts[p];
+    }
+
+    activeBodySlot=0;
+    bodyGeneration=1;
+}
+
+static void completeFabrication() {
+    if(fabricationSlot<0) return;
+
+    StoredBody& b=bodySlots[fabricationSlot];
+    b.occupied=true;
+    b.generation=++bodyGeneration;
+    for(int i=0;i<PART_COUNT;i++) {
+        b.parts[i].maxHp=PLAYER_PART_DEFS[i].maxHp;
+        b.parts[i].hp=PLAYER_PART_DEFS[i].maxHp;
+    }
+
+    fabricationSlot=-1;
+    fabricationTimer=0.0f;
+}
+
+static bool beginFabrication() {
+    if(fabricationSlot>=0) return false;
+    const int slot=findEmptyBodySlot();
+    if(slot<0 || scrap<6 || circuits<2) return false;
+
+    scrap-=6;
+    circuits-=2;
+    fabricationSlot=slot;
+    fabricationTimer=6.0f;
+    return true;
+}
+
+static int currentBodySalvageClass() {
+    float avg=0.0f;
+    for(int i=0;i<PART_COUNT;i++) {
+        avg += playerParts[i].maxHp>0.0f
+            ? std::clamp(playerParts[i].hp/playerParts[i].maxHp,0.0f,1.0f)
+            : 0.0f;
+    }
+    avg/=float(PART_COUNT);
+    return int(std::round(avg*100.0f));
+}
+
+static float calculatePlayerHp();
+
 static void resetPlayerBody() {
     for(int i=0;i<PART_COUNT;i++) {
         playerParts[i].maxHp=PLAYER_PART_DEFS[i].maxHp;
@@ -935,6 +1217,7 @@ static void resetPlayerBody() {
 }
 
 static void storeDestroyedWreck() {
+    saveActiveBodyToPool();
     wreck.active=true;
     wreck.x=px;
     wreck.z=pz;
@@ -957,10 +1240,16 @@ static void storeDestroyedWreck() {
 
 static void beginPlayerDeath() {
     storeDestroyedWreck();
+
+    // The chassis has physically ceased to be an available body.
+    bodySlots[activeBodySlot].occupied=false;
+
     miniBotMode=false;
     respawnTimer=2.20f;
     laserT=0.0f;
     firePointer=-1;
+    aimPointer=-1;
+    actionPointer=-1;
 }
 
 static void updateEnemy(float dt) {
@@ -1026,6 +1315,11 @@ static void updateEnemy(float dt) {
 }
 
 static void update(float dt) {
+    if(fabricationTimer>0.0f) {
+        fabricationTimer=std::max(0.0f,fabricationTimer-dt);
+        if(fabricationTimer<=0.0f) completeFabrication();
+    }
+
     const bool disabled = respawnTimer>0.0f;
 
     if(disabled) {
@@ -1040,23 +1334,28 @@ static void update(float dt) {
             yaw=0.0f;
             aimPitch=0.18f;
 
-            if(spareBodies>0) {
-                // Consciousness returns to the main base, which manufactures or
-                // readies another scarce chassis and inserts us into it.
-                --spareBodies;
-                ++bodyGeneration;
+            const int nextBody=findOtherBodySlot();
+
+            if(nextBody>=0) {
+                // Consciousness reaches the main base and transfers into an
+                // already assembled chassis. The destroyed chassis remains at
+                // its world position as the wreck we recorded above.
                 miniBotMode=false;
-                resetPlayerBody();
+                loadBodyFromSlot(nextBody);
+                bodySlots[nextBody].occupied=true;
             } else {
-                // No complete chassis remains. A small recovery bot becomes the
-                // temporary body and descends to the surface.
+                // No complete chassis remains. A tiny recovery bot is deployed
+                // by the base and becomes the temporary body.
                 miniBotMode=true;
                 resetPlayerBody();
                 playerHp=55.0f;
+                chassisIntegrity=55.0f;
             }
 
             // Keep movement pointer alive. If the player's thumb is still on the
             // joystick, movement resumes immediately after deployment.
+            actionPointer=-1;
+            actionPointerActive=false;
         }
     } else {
         const float dead=0.15f;
@@ -1157,6 +1456,7 @@ static void frame() {
 
     drawGrid(vp);
     drawArenaBlocks(vp);
+    drawTestWorldStructures(vp);
     if(wreck.active) drawWreck(vp);
     if(enemyRespawn<=0.0f) drawEnemy(vp);
 
@@ -1182,6 +1482,9 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             const float radius=h*0.20f;
             joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
+        } else if(!leftZone && pointInActionButton(x,y,w,h) && actionPointer<0) {
+            actionPointer=pointerId;
+            actionPointerActive=performContextAction();
         } else if(!leftZone && pointInFireButton(x,y,w,h) && firePointer<0) {
             // Only a press inside the explicit FIRE button starts firing.
             firePointer=pointerId;
@@ -1204,11 +1507,13 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
         } else if(pointerId==aimPointer) {
             updateAim(x,y);
-        } else if(pointerId!=firePointer && !leftZone) {
-            // If a resumed finger sends MOVE after a death/reboot, allow it to
-            // reacquire its intended right-side control without requiring a tap.
+        } else if(pointerId!=firePointer && pointerId!=actionPointer && !leftZone) {
+            // An unclaimed right-side MOVE can become an aim gesture, but a
+            // dedicated action/fire pointer never changes role mid-gesture.
             if(pointInFireButton(x,y,w,h) && firePointer<0) {
                 firePointer=pointerId;
+            } else if(pointInActionButton(x,y,w,h) && actionPointer<0) {
+                actionPointer=pointerId;
             } else if(aimPointer<0) {
                 aimPointer=pointerId;
                 lastAimX=x;
@@ -1226,6 +1531,10 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
         }
         if(pointerId==aimPointer || action==ACTION_CANCEL) {
             aimPointer=-1;
+        }
+        if(pointerId==actionPointer || action==ACTION_CANCEL) {
+            actionPointer=-1;
+            actionPointerActive=false;
         }
         if(pointerId==firePointer || action==ACTION_CANCEL) {
             firePointer=-1;
