@@ -196,6 +196,11 @@ static int circuits=1;
 static int unknownEquipment=1;
 static int identifiedEquipment=0;
 
+// Identified equipment is deliberately meaningful rather than cosmetic.
+// Each recovered UNKNOWN EQUIPMENT piece upgrades the iconic laser platform.
+static int laserEquipmentLevel=0;
+static bool laserLanceEquipped=false;
+
 static float fabricationTimer=0.0f;
 static int fabricationSlot=-1;
 
@@ -209,6 +214,8 @@ static constexpr float BASE_X=0.0f;
 static constexpr float BASE_Z=0.0f;
 static constexpr float FACILITY_X=11.0f;
 static constexpr float FACILITY_Z=-6.0f;
+static constexpr float BOSS_X=14.0f;
+static constexpr float BOSS_Z=8.0f;
 
 static bool actionPointerActive=false;
 static int actionPointer=-1;
@@ -234,6 +241,16 @@ static float enemyYaw=0.0f;
 static float enemyHp=40.0f;
 static float enemyRespawn=0.0f;
 static float enemyAttackTimer=0.7f;
+
+// Landmark boss: persistent in the world until defeated.
+static float bossX=BOSS_X, bossZ=BOSS_Z;
+static float bossYaw=3.14f;
+static float bossHp=180.0f;
+static float bossAttackTimer=2.0f;
+static float bossLaserT=0.0f;
+static float bossShotDirX=0.0f, bossShotDirZ=0.0f;
+static float bossHitFlash=0.0f;
+static bool bossDefeated=false;
 
 static float playerHitFlash=0.0f;
 static float enemyHitFlash=0.0f;
@@ -405,6 +422,16 @@ static constexpr BeamObstacle BEAM_OBSTACLES[] = {
 
 static constexpr float LASER_PENETRATION=2.20f;
 static constexpr float LASER_MAX_RANGE=18.0f;
+
+static float laserDamagePerSecond() {
+    if(!laserLanceEquipped) return 18.0f;
+    return 18.0f + 12.0f*float(laserEquipmentLevel);
+}
+
+static float laserHeatRate() {
+    if(!laserLanceEquipped) return 0.92f;
+    return std::max(0.50f,0.92f-0.12f*float(laserEquipmentLevel));
+}
 
 static float rayBoxEntryDistance(Vec3 start, Vec3 dir, const BeamObstacle& b) {
     float tmin=0.0f;
@@ -647,6 +674,8 @@ static bool performContextAction() {
         // the facility reveals one hidden piece of equipment.
         --unknownEquipment;
         ++identifiedEquipment;
+        laserEquipmentLevel=std::min(3,laserEquipmentLevel+1);
+        laserLanceEquipped=true;
         return true;
     }
 
@@ -665,6 +694,8 @@ static bool pointInFireButton(float x, float y, float w, float h) {
     return dx*dx+dy*dy <= radius*radius;
 }
 
+static int closestPlayerPartOnRay(Vec3 start,Vec3 dir,float maxDistance);
+
 static void drawEnemy(const Mat4& vp) {
     const float r = enemyHitFlash>0 ? 0.95f : 0.55f;
     const float g = enemyHitFlash>0 ? 0.85f : 0.18f;
@@ -674,6 +705,39 @@ static void drawEnemy(const Mat4& vp) {
     drawCube(vp,{enemyX,1.70f,enemyZ},{0.45f,0.35f,0.45f},enemyYaw,0.45f,0.15f,0.12f);
     drawCube(vp,localOffset({enemyX,0,enemyZ},{0,1.40f,-0.95f},enemyYaw),
              {0.18f,0.14f,0.70f},enemyYaw,0.78f,0.25f,0.18f);
+}
+
+static void drawBoss(const Mat4& vp) {
+    if(bossDefeated) return;
+
+    const float r = bossHitFlash>0 ? 1.0f : 0.34f;
+    const float g = bossHitFlash>0 ? 0.65f : 0.12f;
+    const float b = bossHitFlash>0 ? 0.16f : 0.08f;
+
+    // Heavy core.
+    drawCube(vp,{bossX,1.20f,bossZ},{1.35f,1.10f,1.20f},bossYaw,r,g,b);
+    drawCube(vp,localOffset({bossX,0,bossZ},{0,2.55f,0.0f},bossYaw),
+             {0.72f,0.48f,0.72f},bossYaw,0.50f,0.14f,0.10f);
+
+    // Oversized shoulder / arm blocks.
+    drawCube(vp,localOffset({bossX,0,bossZ},{-1.55f,1.30f,0.0f},bossYaw),
+             {0.52f,0.72f,0.62f},bossYaw,0.28f,0.10f,0.08f);
+    drawCube(vp,localOffset({bossX,0,bossZ},{ 1.55f,1.30f,0.0f},bossYaw),
+             {0.52f,0.72f,0.62f},bossYaw,0.28f,0.10f,0.08f);
+
+    // Legs.
+    drawCube(vp,localOffset({bossX,0,bossZ},{-0.62f,-0.10f,0.0f},bossYaw),
+             {0.45f,0.72f,0.52f},bossYaw,0.24f,0.09f,0.07f);
+    drawCube(vp,localOffset({bossX,0,bossZ},{ 0.62f,-0.10f,0.0f},bossYaw),
+             {0.45f,0.72f,0.52f},bossYaw,0.24f,0.09f,0.07f);
+
+    // Large front cannon.
+    drawCube(vp,localOffset({bossX,0,bossZ},{0,1.65f,-1.45f},bossYaw),
+             {0.25f,0.24f,1.10f},bossYaw,0.72f,0.20f,0.12f);
+
+    // Landmark beacon.
+    drawCube(vp,{bossX,3.15f,bossZ},{0.10f,0.35f,0.10f},0.0f,
+             0.90f,0.24f,0.08f,0.75f);
 }
 
 static void drawLaser(const Mat4& vp) {
@@ -730,6 +794,22 @@ static void drawLaser(const Mat4& vp) {
         muzzleEnd.x,muzzleEnd.y,muzzleEnd.z
     };
     drawLines(vp,muzzle,2,0.60f,1.0f,1.0f,0.95f);
+}
+
+static void drawBossLaser(const Mat4& vp) {
+    if(bossLaserT<=0.0f || bossDefeated) return;
+
+    const Vec3 start={bossX,1.65f,bossZ};
+    const Vec3 end={
+        bossX + bossShotDirX*16.0f,
+        1.20f,
+        bossZ + bossShotDirZ*16.0f
+    };
+    const float verts[]={
+        start.x,start.y,start.z,
+        end.x,end.y,end.z
+    };
+    drawLines(vp,verts,2,1.0f,0.08f,0.06f,0.95f);
 }
 
 static void drawEnemyLaser(const Mat4& vp) {
@@ -1067,6 +1147,26 @@ static void drawHud() {
                    0.65f,0.92f,0.98f,0.95f);
     }
 
+    if(laserLanceEquipped) {
+        drawText2D(hud,"LANCE",viewportW*0.47f,pad+44.0f,2.2f,
+                   0.35f,0.90f,1.0f,0.92f);
+        char lvl[8]{};
+        std::snprintf(lvl,sizeof(lvl),"%d",laserEquipmentLevel);
+        drawText2D(hud,lvl,viewportW*0.60f,pad+44.0f,2.6f,
+                   1.0f,0.90f,0.38f,0.95f);
+    }
+
+    if(!bossDefeated) {
+        const float bw=viewportW*0.26f;
+        const float bx=viewportW*0.37f;
+        const float by=viewportH*0.07f;
+        drawText2D(hud,"BOSS",bx,by-22.0f,3.0f,
+                   1.0f,0.55f,0.30f,0.90f);
+        drawRect2D(hud,bx,by,bx+bw,by+12.0f,0.08f,0.03f,0.03f,0.85f);
+        drawRect2D(hud,bx,by,bx+bw*std::clamp(bossHp/180.0f,0.0f,1.0f),
+                   by+12.0f,0.90f,0.18f,0.08f,0.92f);
+    }
+
     if(wreck.active) {
         char salvage[32]{};
         std::snprintf(salvage,sizeof(salvage),"SALVAGE");
@@ -1374,6 +1474,50 @@ static void updateEnemy(float dt) {
     }
 }
 
+static void updateBoss(float dt) {
+    if(bossDefeated) return;
+
+    const float dx=px-bossX;
+    const float dz=pz-bossZ;
+    const float distance=std::sqrt(std::max(0.0001f,dx*dx+dz*dz));
+    bossYaw=std::atan2(dx,-dz);
+
+    if(distance>7.0f) {
+        const float speed=0.72f;
+        const float nx=std::clamp(bossX+(dx/distance)*speed*dt,-16.5f,16.5f);
+        const float nz=std::clamp(bossZ+(dz/distance)*speed*dt,-16.5f,16.5f);
+        if(!collidesObstacle(nx,bossZ,1.25f)) bossX=nx;
+        if(!collidesObstacle(bossX,nz,1.25f)) bossZ=nz;
+    }
+
+    bossAttackTimer-=dt;
+    if(bossAttackTimer<=0.0f && distance<15.0f) {
+        bossAttackTimer=1.65f;
+        bossLaserT=0.16f;
+        bossShotDirX=dx/std::max(0.001f,distance);
+        bossShotDirZ=dz/std::max(0.001f,distance);
+
+        const Vec3 shotStart={bossX,1.65f,bossZ};
+        const Vec3 target={px,1.10f,pz};
+        const Vec3 shotDir=norm(sub(target,shotStart));
+        const int detectedPart=closestPlayerPartOnRay(shotStart,shotDir,distance+1.0f);
+        const int hitPart=miniBotMode ? PART_CORE : (detectedPart>=0 ? detectedPart : PART_CORE);
+
+        const float partDamage=miniBotMode ? 12.0f : 9.0f;
+        playerParts[hitPart].hp=
+            std::max(0.0f,playerParts[hitPart].hp-partDamage);
+
+        const float structuralDamage=miniBotMode ? 10.0f : 3.25f;
+        chassisIntegrity=std::max(0.0f,chassisIntegrity-structuralDamage);
+        playerHp=std::min(calculatePlayerHp(),chassisIntegrity);
+        playerHitFlash=0.16f;
+
+        if(playerHp<=0.0f || chassisIntegrity<=0.0f) {
+            beginPlayerDeath();
+        }
+    }
+}
+
 static void update(float dt) {
     if(fabricationTimer>0.0f) {
         fabricationTimer=std::max(0.0f,fabricationTimer-dt);
@@ -1436,7 +1580,7 @@ static void update(float dt) {
         movePlayer(move.x*speed*dt,move.z*speed*dt);
 
         if(!miniBotMode && firePointer>=0 && heat<0.92f) {
-            heat=std::min(1.0f,heat+dt*0.92f);
+            heat=std::min(1.0f,heat+dt*laserHeatRate());
             laserT=0.08f;
         } else {
             heat=std::max(0.0f,heat-dt*0.42f);
@@ -1445,10 +1589,13 @@ static void update(float dt) {
     }
 
     updateEnemy(dt);
+    updateBoss(dt);
 
     enemyLaserT=std::max(0.0f,enemyLaserT-dt);
+    bossLaserT=std::max(0.0f,bossLaserT-dt);
     playerHitFlash=std::max(0.0f,playerHitFlash-dt);
     enemyHitFlash=std::max(0.0f,enemyHitFlash-dt);
+    bossHitFlash=std::max(0.0f,bossHitFlash-dt);
 
     // Laser hit test uses the same obstruction trace as the visual beam.
     // A low-resistance obstacle can be penetrated; a high-resistance obstacle
@@ -1476,12 +1623,38 @@ static void update(float dt) {
             const Vec3 enemyCenter={enemyX,0.95f,enemyZ};
             const float d2=dot(sub(enemyCenter,closest),sub(enemyCenter,closest));
             if(d2<1.65f) {
-                enemyHp-=18.0f*trace.energy*dt*60.0f;
+                enemyHp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
                 enemyHitFlash=0.08f;
                 if(enemyHp<=0.0f) {
                     enemyHp=0.0f;
                     enemyRespawn=2.0f;
                     enemyHitFlash=0.35f;
+                }
+            }
+        }
+
+        if(!bossDefeated) {
+            const Vec3 toBoss={bossX-start.x,1.35f-start.y,bossZ-start.z};
+            const float bossAlong=dot(toBoss,dir);
+            if(bossAlong>0.0f && bossAlong<=maxBeamDistance+0.05f && bossAlong<LASER_MAX_RANGE) {
+                const Vec3 closestBoss=add(start,mul(dir,bossAlong));
+                const Vec3 bossCenter={bossX,1.35f,bossZ};
+                const float bossD2=dot(sub(bossCenter,closestBoss),sub(bossCenter,closestBoss));
+                if(bossD2<3.10f) {
+                    bossHp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
+                    bossHitFlash=0.08f;
+                    if(bossHp<=0.0f) {
+                        bossHp=0.0f;
+                        bossDefeated=true;
+                        bossHitFlash=0.45f;
+
+                        // Landmark bosses are a source of named discovery,
+                        // not a respawning farm: defeating this one unlocks
+                        // another UNKNOWN EQUIPMENT piece and components.
+                        ++unknownEquipment;
+                        scrap+=5;
+                        circuits+=2;
+                    }
                 }
             }
         }
@@ -1519,6 +1692,7 @@ static void frame() {
     drawTestWorldStructures(vp);
     if(wreck.active) drawWreck(vp);
     if(enemyRespawn<=0.0f) drawEnemy(vp);
+    if(!bossDefeated) drawBoss(vp);
 
     if(respawnTimer<=0.0f && !miniBotMode) {
         drawMech(vp);
@@ -1528,6 +1702,7 @@ static void frame() {
     }
 
     drawEnemyLaser(vp);
+    drawBossLaser(vp);
     drawHud();
 }
 
