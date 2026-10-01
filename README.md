@@ -1,54 +1,74 @@
-# DG Build 0004
+# DG Build 0006
 
-Playable Android combat foundation for the Destroy Gunners-inspired persistent exploration project.
+Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
-## 0004: remote-body / salvage foundation
+## What can now be tested in one run
 
-The player is treated as a remote consciousness rather than a permanently attached pilot.
+### Combat / movement
+- Continuous virtual movement.
+- Independent right-side aiming.
+- Dedicated FIRE control.
+- Proper MOVE + AIM + FIRE multitouch.
+- Enemy pursuit and attack.
+- Individual mech part damage.
+- Overall chassis integrity.
+- HP reaches zero reliably.
+- Body visual parts darken as local damage accumulates.
 
-- The current mech is a physical **body** that can be destroyed and left behind.
-- The wreck remains at the death location.
-- Every major mech section has its own simplified hitbox/health state: core, head, left/right arm, left/right leg, weapon.
-- Damage is applied to individual parts instead of only a single invisible HP pool.
-- Wreck salvage quality is calculated from the surviving condition of the individual parts; severe damage reduces recoverable value disproportionately.
-- The HUD exposes the current number of spare assembled bodies.
-- On death, an available spare body is deployed from the home-base concept.
-- When the assembled-body pool is exhausted, the prototype switches to a small temporary recovery-bot body.
-- The foundation is ready for the later base system: land base or orbital/space base, component scarcity, fabrication time, deliberate body swapping, and recovery/deployment sequences.
+### Laser
+- Visible laser beam restored with cheap glow/muzzle layers.
+- Long baseline range.
+- Obstacle-aware beam trace.
+- Material-specific penetration resistance.
+- Light obstacle -> penetrates with reduced energy.
+- Heavy obstacle -> consumes penetration and can stop the beam.
+- Gameplay collision uses the same traced range/energy as the visual beam.
 
-## DG-0005 fixes
+### ULTRON-style body system
+- Active consciousness uses a physical chassis.
+- Multiple assembled bodies exist in a small body pool.
+- SWAP is available at the home base.
+- Swapping preserves the condition of the body left in storage.
+- Destroyed chassis becomes a world wreck instead of disappearing.
+- No complete chassis -> temporary recovery bot mode.
+- Recovery-bot state cannot accidentally create a new assembled chassis.
 
-- HP no longer depends solely on the currently selected hitbox, so it cannot stall at a body-part boundary.
-- Every successful enemy hit now applies localized part damage plus a small chassis-integrity hit.
-- Chassis integrity is reset with each new body.
-- Aim pitch is reset with each new body.
-- Vertical aiming is clamped to a practical combat range instead of allowing the beam to point almost straight down.
-- Laser rendering now accounts for ground intersection so a downward beam cannot visually continue below the ground.
-- The gameplay hit test uses the same effective 3D beam direction/range as the visual.
+### Salvage
+- Wreck remembers the remaining HP of each body part.
+- Close to a wreck + ACT converts recoverable sections into SCRAP/CIRCUIT resources.
+- More intact parts yield more recoverable material.
+- Destroyed/near-destroyed parts yield little or nothing.
 
-## Laser
+### Facility / unknown equipment
+- A test discovery facility exists in the world.
+- A visible unknown equipment pod sits outside it.
+- Close to the facility + ACT identifies the unknown equipment.
+- This is intentionally location-driven rather than random-stat spam.
 
-- The laser visual is restored and made more visible with a core beam, cheap glow lines, and a muzzle pulse.
-- Beam range and collision use the same trace.
-- Obstacles have material-specific penetration resistance.
-- Light debris can be pierced with reduced energy.
-- Dense concrete/industrial/metal barriers consume progressively more penetration.
-- A sufficiently resistant obstacle stops the beam.
-- Targets behind penetrable obstacles receive reduced laser damage according to remaining beam energy.
+### Body fabrication
+- At the base + ACT starts fabrication when the required resources and an empty body slot exist.
+- Current test recipe: 6 SCRAP + 2 CIRCUIT.
+- Fabrication takes 6 seconds.
+- A completed chassis is added to the body pool.
 
-## Controls
+## Suggested test sequence
 
-**MOVE:** hold/drag the left virtual joystick.
+1. Start at the home base and press **SWAP**. Confirm the active mech changes while the previous chassis remains stored.
+2. Move toward the enemy. Use MOVE + AIM + FIRE simultaneously.
+3. Fight while deliberately exposing different body areas and watch local damage accumulate.
+4. Let the current chassis reach zero HP. Confirm the wreck remains where the fight happened.
+5. Return to/approach the wreck and press **ACT**. Confirm SCRAP/CIRCUIT resources increase according to the wreck's surviving parts.
+6. Travel to the discovery facility and press **ACT** beside the unknown pod. Confirm the unknown equipment is identified.
+7. Return to base. With an empty body slot and sufficient salvaged resources, press **ACT** and watch the fabrication timer.
+8. After fabrication, press **SWAP** and confirm the newly fabricated body is available.
+9. Exhaust all assembled bodies through deaths and confirm the game falls back to the temporary recovery bot.
 
-**AIM:** swipe in the right-side aim area.
+## Architecture direction
 
-**FIRE:** press and hold the dedicated lower-right FIRE button.
+The prototype now has the core shape of:
+**remote consciousness -> physical body -> localized damage -> abandoned wreck -> salvage -> scarce components -> fabrication -> replacement body -> continued exploration**
 
-MOVE + AIM + FIRE can be used together.
-
-## What remains prototype-level
-
-The current body system is a gameplay foundation, not the final inventory/base UI. Body construction scarcity, fabrication timers, body swapping, physical wreck harvesting, component-by-component salvage inventory, land/space base transitions, and mini-bot deployment animation will be expanded as persistent-world systems.
+Land vs orbital base, persistent saves, large procedural world, named facilities, boss landmarks, equipment rarity/identity, and deeper salvage/component inventories remain later systems.
 
 ## Build / test
 
