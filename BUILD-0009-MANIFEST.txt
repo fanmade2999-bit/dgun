@@ -1,0 +1,54 @@
+BUILD: 0009
+APP ID: com.fanmade.dg
+VERSION: 0.0.9
+VERSION CODE: 9
+
+INTEGRATED SYSTEMS
+- Movement + independent aim + dedicated fire.
+- Multi-touch control roles.
+- Enemy pursuit/attack and per-part damage.
+- Chassis integrity and reliable death.
+- Visible laser with obstacle-aware penetration.
+- Physical wreck persistence during the prototype session.
+- Body pool with multiple assembled chassis.
+- Base body swapping.
+- Recovery bot fallback when assembled bodies are exhausted.
+- Part-dependent salvage.
+- SCRAP/CIRCUIT resource economy.
+- Discovery facility with UNKNOWN EQUIPMENT pod.
+- Location-based equipment identification.
+- LANCE equipment progression that changes laser damage and heat.
+- Persistent landmark boss with one-time progression reward.
+- Deterministic procedural terrain.
+- 1024 × 1024 toroidal world.
+- 32 × 32 deterministic chunk torus.
+- 16 × 16 tiles per chunk.
+- Live X/Y/Z coordinates.
+- Current chunk + local tile coordinates.
+- Compact nearby-chunk minimap.
+- Expandable full-world chunk map with landmark markers.
+
+TEST CONTROLS
+- MOVE: left joystick.
+- AIM: right-side swipe area.
+- FIRE: lower-right FIRE button.
+- SWAP: upper-right SWAP button when at base.
+- ACT: lower-right-left contextual action button.
+  - wreck = salvage
+  - facility = identify
+  - base = fabricate
+- MAP: upper-right MAP button toggles compact/full map.
+
+WORLD TEST
+- Start at the base near chunk C0,0.
+- Walk east through the world and watch X/chunk coordinates change.
+- Continue across the +512 seam and verify coordinates wrap to the western side.
+- Walk west across the opposite seam and verify the reverse.
+- Watch the chunk borders move with the active area.
+- Tap MAP and verify the full 32 × 32 chunk map and current-chunk highlight.
+- Return to compact MAP mode and confirm landmark markers remain visible.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA + PHYSICAL DEVICE TEST
