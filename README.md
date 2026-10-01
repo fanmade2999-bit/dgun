@@ -1,4 +1,4 @@
-# DG Build 0007
+# DG Build 0008
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
@@ -45,6 +45,14 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Close to the facility + ACT identifies the unknown equipment.
 - This is intentionally location-driven rather than random-stat spam.
 
+### Toroidal procedural world
+- The playable world is now a finite **128 × 128 world-unit torus**.
+- Moving past the eastern boundary wraps to the western side; the same works north/south.
+- Terrain is generated deterministically from wrapped tile coordinates, so the same location is reproducible after restarting.
+- The renderer only draws a local generated window around the player, so the world can be larger than the visible area without drawing the entire map.
+- World interactions, enemy pursuit, boss pursuit, and legacy landmarks use shortest toroidal distance.
+- Seam rendering uses the nearest wrapped image so landmarks and entities remain visible when crossing the boundary.
+
 ### Landmark boss + equipment progression
 - A large persistent boss now lives at a fixed world landmark.
 - Boss has its own HP, movement pressure, attack cycle, hit flash and laser.
@@ -77,7 +85,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 The prototype now has the core shape of:
 **remote consciousness -> physical body -> localized damage -> abandoned wreck -> salvage -> scarce components -> fabrication -> replacement body -> continued exploration**
 
-Land vs orbital base, persistent saves, large procedural world, named facilities beyond the test site, more boss variants, equipment rarity/identity beyond the prototype LANCE path, and deeper salvage/component inventories remain later systems.
+Persistent saves, a larger procedural terrain/biome vocabulary, named facilities beyond the test site, more boss variants, a persistent world map, equipment rarity/identity beyond the prototype LANCE path, and deeper salvage/component inventories remain later systems.
 
 ## Build / test
 
