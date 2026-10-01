@@ -213,7 +213,6 @@ static constexpr float FACILITY_Z=-6.0f;
 static bool actionPointerActive=false;
 static int actionPointer=-1;
 static int swapPointer=-1;
-static bool actionPointerActive=false;
 
 struct WreckState {
     bool active=false;
@@ -1276,7 +1275,9 @@ static void resetPlayerBody() {
 }
 
 static void storeDestroyedWreck() {
-    saveActiveBodyToPool();
+    // A normal chassis remains a salvageable wreck. A temporary recovery bot is
+    // not an assembled chassis and must not magically create a new body slot.
+    if(!miniBotMode) saveActiveBodyToPool();
     wreck.active=true;
     wreck.x=px;
     wreck.z=pz;
