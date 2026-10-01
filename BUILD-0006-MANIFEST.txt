@@ -1,0 +1,41 @@
+BUILD: 0006
+APP ID: com.fanmade.dg
+VERSION: 0.0.6
+VERSION CODE: 6
+
+INTEGRATED SYSTEMS
+- Movement + independent aim + dedicated fire.
+- Multi-touch control roles.
+- Enemy pursuit/attack and per-part damage.
+- Chassis integrity and reliable death.
+- Visible laser with obstacle-aware penetration.
+- Physical wreck persistence during the prototype session.
+- Body pool with multiple assembled chassis.
+- Base body swapping.
+- Recovery bot fallback when assembled bodies are exhausted.
+- Part-dependent salvage.
+- SCRAP/CIRCUIT resource economy.
+- Discovery facility with UNKNOWN EQUIPMENT pod.
+- Location-based equipment identification.
+- Slow body fabrication using scarce components.
+
+TEST CONTROLS
+- MOVE: left joystick.
+- AIM: right-side swipe area.
+- FIRE: lower-right FIRE button.
+- SWAP: upper-right SWAP button when at base.
+- ACT: lower-right-left contextual action button.
+  - wreck = salvage
+  - facility = identify
+  - base = fabricate
+
+TEST WORLD
+- Home base at world origin.
+- Discovery facility at a separate world location.
+- Current arena obstacles remain collision-enabled.
+- Laser penetration resistance differs per obstacle.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA + PHYSICAL DEVICE TEST
