@@ -1761,11 +1761,11 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
 static void drawHud() {
     const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
 
+    glDisable(GL_DEPTH_TEST);
+
     // Compact minimap stays behind the gameplay HUD. The expanded map is
     // composited last so it behaves like a real map overlay.
     if(!mapExpanded) drawMinimap(hud,false);
-
-    glDisable(GL_DEPTH_TEST);
 
     const float pad=22.0f;
     const float barW=viewportW*0.28f;
