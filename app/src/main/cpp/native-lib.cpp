@@ -368,6 +368,40 @@ static float bossShotDirX=0.0f, bossShotDirZ=0.0f;
 static float bossHitFlash=0.0f;
 static bool bossDefeated=false;
 
+// Autonomous ecosystem. These actors belong to the world, not to the player.
+// Their simulation continues regardless of the player's distance, camera,
+// death state, or current map view.
+enum EcosystemKind : uint8_t {
+    ECO_GRAZER=0,
+    ECO_SCAVENGER=1,
+    ECO_HUNTER=2
+};
+
+struct EcoActor {
+    bool alive=false;
+    int kind=ECO_GRAZER;
+    float x=0.0f, z=0.0f;
+    float yaw=0.0f;
+    float hp=1.0f;
+    float hunger=0.0f;
+    float energy=1.0f;
+    float age=0.0f;
+    float breedCooldown=0.0f;
+    float brain=0.0f;
+    float corpseTimer=0.0f;
+    int target=-1;
+    int homeChunkX=0;
+    int homeChunkZ=0;
+    uint32_t seed=0;
+};
+
+static constexpr int MAX_ECO_ACTORS=48;
+static constexpr int INITIAL_ECO_ACTORS=30;
+static EcoActor ecoActors[MAX_ECO_ACTORS]{};
+static float ecosystemClock=0.0f;
+static float ecosystemAccumulator=0.0f;
+static int ecosystemPopulation=0;
+
 static float playerHitFlash=0.0f;
 static float enemyHitFlash=0.0f;
 static float laserT=0.0f;
@@ -384,6 +418,7 @@ static double nowSeconds() {
 // Forward declarations for systems whose definitions live later in this
 // single-file prototype.
 static void initializeBodyPool();
+static void initializeEcosystem();
 static bool beginFabrication();
 static int findOtherBodySlot();
 static void saveActiveBodyToPool();
@@ -470,6 +505,7 @@ static void initGL() {
     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     glClearColor(0.025f,0.035f,0.05f,1.0f);
     initializeBodyPool();
+    initializeEcosystem();
 }
 
 static void drawCube(
@@ -711,6 +747,351 @@ static LaserTrace traceLaser(Vec3 start,Vec3 dir) {
     result.remainingPenetration=penetration;
     result.energy=std::clamp(energy,0.0f,1.0f);
     return result;
+}
+
+static float ecoDistance(int a,int b) {
+    return std::sqrt(
+        std::max(0.0001f,
+            wrappedDelta(ecoActors[a].x,ecoActors[b].x)*
+            wrappedDelta(ecoActors[a].x,ecoActors[b].x) +
+            wrappedDelta(ecoActors[a].z,ecoActors[b].z)*
+            wrappedDelta(ecoActors[a].z,ecoActors[b].z)
+        )
+    );
+}
+
+static float ecoDistanceTo(float x,float z,float tx,float tz) {
+    const float dx=wrappedDelta(x,tx);
+    const float dz=wrappedDelta(z,tz);
+    return std::sqrt(std::max(0.0001f,dx*dx+dz*dz));
+}
+
+static int ecoFindEmptySlot() {
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        if(!ecoActors[i].alive && ecoActors[i].corpseTimer<=0.0f) return i;
+    }
+    return -1;
+}
+
+static void ecoWrapActor(EcoActor& a) {
+    a.x=wrapWorld(a.x);
+    a.z=wrapWorld(a.z);
+}
+
+static void ecoSpawnActor(int slot,int kind,uint32_t seed,float x,float z) {
+    EcoActor& a=ecoActors[slot];
+    a=EcoActor{};
+    a.alive=true;
+    a.kind=kind;
+    a.seed=seed;
+    a.x=wrapWorld(x);
+    a.z=wrapWorld(z);
+    a.yaw=float(seed%6283u)/1000.0f;
+    a.hp=(kind==ECO_HUNTER)?90.0f:((kind==ECO_SCAVENGER)?58.0f:42.0f);
+    a.hunger=0.12f+float((seed>>7)&31u)/220.0f;
+    a.energy=0.65f+float((seed>>13)&31u)/100.0f;
+    a.age=5.0f+float((seed>>18)&31u);
+    a.homeChunkX=chunkCoord(a.x);
+    a.homeChunkZ=chunkCoord(a.z);
+    a.brain=0.4f+float((seed>>23)&31u)/30.0f;
+    ecosystemPopulation++;
+}
+
+static void initializeEcosystem() {
+    ecosystemPopulation=0;
+    ecosystemClock=0.0f;
+    ecosystemAccumulator=0.0f;
+    for(int i=0;i<MAX_ECO_ACTORS;i++) ecoActors[i]=EcoActor{};
+
+    // Place independent populations across the whole torus. No spawn decision
+    // references player coordinates, camera position, or current chunk.
+    for(int i=0;i<INITIAL_ECO_ACTORS;i++) {
+        const uint32_t seed=worldHash(i*17-31,i*29+7)^(0xA511E9B3u+uint32_t(i)*0x9E3779B9u);
+        const int cx=positiveMod(i*7+3,WORLD_CHUNK_COUNT)-WORLD_CHUNK_COUNT/2;
+        const int cz=positiveMod(i*13+11,WORLD_CHUNK_COUNT)-WORLD_CHUNK_COUNT/2;
+        const float fx=0.18f+float((seed>>3)&255u)/255.0f*0.64f;
+        const float fz=0.18f+float((seed>>11)&255u)/255.0f*0.64f;
+        const float x=(float(cx)+fx)*CHUNK_WORLD_SIZE;
+        const float z=(float(cz)+fz)*CHUNK_WORLD_SIZE;
+        const int kind=(i%10<5)?ECO_GRAZER:((i%10<8)?ECO_SCAVENGER:ECO_HUNTER);
+        ecoSpawnActor(i,kind,seed,x,z);
+    }
+}
+
+static int ecoChoosePrey(int hunterSlot) {
+    float best=999999.0f;
+    int bestSlot=-1;
+    const EcoActor& h=ecoActors[hunterSlot];
+
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        if(i==hunterSlot || !ecoActors[i].alive) continue;
+        if(ecoActors[i].kind==ECO_HUNTER) continue;
+
+        const float d=ecoDistance(hunterSlot,i);
+        if(d<best && d<28.0f) {
+            best=d;
+            bestSlot=i;
+        }
+    }
+    return bestSlot;
+}
+
+static int ecoChooseCorpse(int scavengerSlot) {
+    float best=999999.0f;
+    int bestSlot=-1;
+    const EcoActor& s=ecoActors[scavengerSlot];
+
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        if(i==scavengerSlot || ecoActors[i].alive || ecoActors[i].corpseTimer<=0.0f) continue;
+        const float d=ecoDistanceTo(s.x,s.z,ecoActors[i].x,ecoActors[i].z);
+        if(d<best && d<30.0f) {
+            best=d;
+            bestSlot=i;
+        }
+    }
+    return bestSlot;
+}
+
+static int ecoFindMate(int slot) {
+    const EcoActor& a=ecoActors[slot];
+    if(a.kind==ECO_HUNTER) return -1;
+
+    float best=999999.0f;
+    int bestSlot=-1;
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        if(i==slot || !ecoActors[i].alive || ecoActors[i].kind!=a.kind) continue;
+        if(ecoActors[i].breedCooldown>0.0f || ecoActors[i].hunger>0.32f || ecoActors[i].energy<0.45f) continue;
+
+        const float d=ecoDistance(slot,i);
+        if(d<best && d<2.8f) {
+            best=d;
+            bestSlot=i;
+        }
+    }
+    return bestSlot;
+}
+
+static void ecoKillActor(int slot) {
+    if(slot<0 || slot>=MAX_ECO_ACTORS || !ecoActors[slot].alive) return;
+    EcoActor& a=ecoActors[slot];
+    a.alive=false;
+    a.hp=0.0f;
+    a.target=-1;
+    a.corpseTimer=30.0f+float((a.seed>>5)&31u);
+    ecosystemPopulation=std::max(0,ecosystemPopulation-1);
+}
+
+static void ecoReproduce(int aSlot,int bSlot) {
+    if(aSlot<0 || bSlot<0 || ecosystemPopulation>=MAX_ECO_ACTORS) return;
+    EcoActor& a=ecoActors[aSlot];
+    EcoActor& b=ecoActors[bSlot];
+    if(!a.alive || !b.alive || a.kind!=b.kind) return;
+
+    const int slot=ecoFindEmptySlot();
+    if(slot<0) return;
+
+    const uint32_t seed=(a.seed*1664525u)+(b.seed*1013904223u)+uint32_t(slot*2654435761u);
+    const float ox=(float(int((seed>>2)&63u))-31.0f)*0.018f;
+    const float oz=(float(int((seed>>10)&63u))-31.0f)*0.018f;
+    ecoSpawnActor(slot,a.kind,seed,wrapWorld((a.x+b.x)*0.5f+ox),wrapWorld((a.z+b.z)*0.5f+oz));
+    ecoActors[slot].age=0.0f;
+    ecoActors[slot].hunger=0.08f;
+    ecoActors[slot].energy=0.55f;
+    a.breedCooldown=18.0f;
+    b.breedCooldown=18.0f;
+}
+
+static void simulateEcosystemTick(float dt) {
+    ecosystemClock+=dt;
+
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        EcoActor& a=ecoActors[i];
+
+        if(!a.alive) {
+            if(a.corpseTimer>0.0f) {
+                a.corpseTimer=std::max(0.0f,a.corpseTimer-dt);
+            }
+            continue;
+        }
+
+        a.age+=dt;
+        a.hunger=std::min(1.2f,a.hunger+dt*(a.kind==ECO_HUNTER?0.024f:0.018f));
+        a.energy=std::max(0.0f,a.energy-dt*0.006f);
+        a.breedCooldown=std::max(0.0f,a.breedCooldown-dt);
+
+        if(a.hunger>=1.0f || a.age>1800.0f) {
+            ecoKillActor(i);
+            continue;
+        }
+
+        float moveX=0.0f;
+        float moveZ=0.0f;
+        const float seedPhase=float(a.seed%628u)*0.01f;
+
+        if(a.kind==ECO_HUNTER) {
+            if(a.target<0 || !ecoActors[a.target].alive ||
+               ecoDistance(i,a.target)>34.0f) {
+                a.target=ecoChoosePrey(i);
+            }
+
+            if(a.target>=0) {
+                const float dx=wrappedDelta(a.x,ecoActors[a.target].x);
+                const float dz=wrappedDelta(a.z,ecoActors[a.target].z);
+                const float d=std::sqrt(std::max(0.0001f,dx*dx+dz*dz));
+                moveX=dx/d;
+                moveZ=dz/d;
+                a.yaw=std::atan2(dx,-dz);
+
+                if(d<1.6f) {
+                    EcoActor& prey=ecoActors[a.target];
+                    prey.hp-=8.0f*dt;
+                    a.hunger=std::max(0.0f,a.hunger-0.040f*dt);
+                    a.energy=std::min(1.0f,a.energy+0.015f*dt);
+                    if(prey.hp<=0.0f) {
+                        ecoKillActor(a.target);
+                        a.target=-1;
+                    }
+                }
+            } else {
+                a.yaw+=std::sin(ecosystemClock*0.35f+seedPhase)*dt*0.45f;
+                moveX=std::sin(a.yaw);
+                moveZ=-std::cos(a.yaw);
+            }
+        } else if(a.kind==ECO_GRAZER) {
+            // Grazers follow a slow moving food patch determined by their own
+            // home chunk and world time, never by the player.
+            const float fx=wrapWorld(
+                (float(a.homeChunkX)+0.5f+
+                 0.24f*std::sin(ecosystemClock*0.025f+seedPhase))*
+                CHUNK_WORLD_SIZE
+            );
+            const float fz=wrapWorld(
+                (float(a.homeChunkZ)+0.5f+
+                 0.24f*std::cos(ecosystemClock*0.021f+seedPhase))*
+                CHUNK_WORLD_SIZE
+            );
+            const float dx=wrappedDelta(a.x,fx);
+            const float dz=wrappedDelta(a.z,fz);
+            const float d=std::sqrt(std::max(0.0001f,dx*dx+dz*dz));
+
+            if(d<4.0f) {
+                a.hunger=std::max(0.0f,a.hunger-dt*0.090f);
+                a.energy=std::min(1.0f,a.energy+dt*0.020f);
+                moveX=dx/d*0.25f;
+                moveZ=dz/d*0.25f;
+            } else {
+                moveX=dx/d;
+                moveZ=dz/d;
+            }
+
+            // Mild social wandering keeps herds from becoming static points.
+            const float side=std::sin(ecosystemClock*0.12f+seedPhase)*0.35f;
+            moveX+=std::cos(a.yaw)*side;
+            moveZ+=std::sin(a.yaw)*side;
+            a.yaw=std::atan2(moveX,-moveZ);
+        } else {
+            int corpse=ecoChooseCorpse(i);
+            if(corpse>=0) {
+                const float dx=wrappedDelta(a.x,ecoActors[corpse].x);
+                const float dz=wrappedDelta(a.z,ecoActors[corpse].z);
+                const float d=std::sqrt(std::max(0.0001f,dx*dx+dz*dz));
+                moveX=dx/d;
+                moveZ=dz/d;
+                a.yaw=std::atan2(dx,-dz);
+
+                if(d<1.7f) {
+                    a.hunger=std::max(0.0f,a.hunger-dt*0.110f);
+                    a.energy=std::min(1.0f,a.energy+dt*0.025f);
+                    ecoActors[corpse].corpseTimer=std::max(0.0f,ecoActors[corpse].corpseTimer-dt*3.0f);
+                }
+            } else {
+                a.yaw+=std::sin(ecosystemClock*0.18f+seedPhase)*dt*0.8f;
+                moveX=std::sin(a.yaw);
+                moveZ=-std::cos(a.yaw);
+            }
+        }
+
+        const float speed=(a.kind==ECO_HUNTER)?1.35f:((a.kind==ECO_GRAZER)?0.62f:0.86f);
+        const float magnitude=std::sqrt(std::max(0.0001f,moveX*moveX+moveZ*moveZ));
+        moveX/=magnitude;
+        moveZ/=magnitude;
+
+        const float nextX=wrapWorld(a.x+moveX*speed*dt);
+        const float nextZ=wrapWorld(a.z+moveZ*speed*dt);
+
+        // Ecosystem agents can route around generated solid tiles. If a step is
+        // blocked, they turn rather than freezing forever.
+        if(!proceduralSolidAt(nextX,a.z)) a.x=nextX;
+        else a.yaw+=1.10f;
+
+        if(!proceduralSolidAt(a.x,nextZ)) a.z=nextZ;
+        else a.yaw+=0.70f;
+
+        ecoWrapActor(a);
+
+        const int mate=ecoFindMate(i);
+        if(mate>=0 && ((uint32_t(int(a.age*10.0f))^a.seed)&31u)==0u) {
+            ecoReproduce(i,mate);
+        }
+    }
+}
+
+static void updateEcosystem(float dt) {
+    ecosystemAccumulator+=dt;
+    constexpr float TICK=0.20f;
+
+    int safety=0;
+    while(ecosystemAccumulator>=TICK && safety<4) {
+        ecosystemAccumulator-=TICK;
+        simulateEcosystemTick(TICK);
+        safety++;
+    }
+}
+
+static int ecosystemChunkPopulation(int cx,int cz) {
+    int count=0;
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        if(!ecoActors[i].alive) continue;
+        if(chunkCoord(ecoActors[i].x)==cx && chunkCoord(ecoActors[i].z)==cz) count++;
+    }
+    return count;
+}
+
+static void drawEcosystem(const Mat4& vp) {
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        const EcoActor& a=ecoActors[i];
+        if(!a.alive) {
+            if(a.corpseTimer<=0.0f) continue;
+            const float d=ecoDistanceTo(px,pz,a.x,a.z);
+            if(d>42.0f) continue;
+
+            const float cx=nearestWorldImage(a.x,px);
+            const float cz=nearestWorldImage(a.z,pz);
+            drawCube(vp,{cx,0.16f,cz},{0.28f,0.08f,0.28f},a.yaw,
+                     0.16f,0.12f,0.10f,0.80f);
+            continue;
+        }
+
+        const float d=ecoDistanceTo(px,pz,a.x,a.z);
+        if(d>42.0f) continue;
+
+        const float x=nearestWorldImage(a.x,px);
+        const float z=nearestWorldImage(a.z,pz);
+        const float size=(a.kind==ECO_HUNTER)?0.45f:((a.kind==ECO_SCAVENGER)?0.32f:0.28f);
+        const float y=size+0.10f;
+        const float r=(a.kind==ECO_HUNTER)?0.72f:((a.kind==ECO_SCAVENGER)?0.54f:0.22f);
+        const float g=(a.kind==ECO_HUNTER)?0.20f:((a.kind==ECO_SCAVENGER)?0.48f:0.62f);
+        const float b=(a.kind==ECO_HUNTER)?0.12f:((a.kind==ECO_SCAVENGER)?0.62f:0.34f);
+
+        drawCube(vp,{x,y,z},{size,size*0.72f,size},a.yaw,r,g,b);
+
+        // Hunger/condition cue: weak actors become visually dimmer/smaller.
+        const float condition=std::clamp(1.0f-a.hunger*0.65f,0.35f,1.0f);
+        if(condition<0.58f) {
+            drawCube(vp,{x,y+size*0.72f,z},{size*0.42f,0.08f,size*0.42f},a.yaw,
+                     0.50f,0.18f,0.10f,0.55f);
+        }
+    }
 }
 
 static void drawMech(const Mat4& vp) {
@@ -1286,10 +1667,12 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
                 const int cx=centerX+mx-visible/2;
                 const int cz=centerZ+mz-visible/2;
                 const uint32_t h=chunkHash(cx,cz);
+                const int population=ecosystemChunkPopulation(cx,cz);
                 const bool industrial=chunkBiomeIsIndustrial(cx,cz);
-                const float r=industrial?0.38f:0.09f+0.03f*float((h>>3)&3u);
-                const float g=industrial?0.25f:0.16f+0.025f*float((h>>6)&3u);
-                const float b=industrial?0.15f:0.20f+0.03f*float((h>>9)&3u);
+                const float life=std::clamp(float(population)/5.0f,0.0f,1.0f);
+                const float r=industrial?(0.38f+life*0.10f):(0.09f+0.03f*float((h>>3)&3u)+life*0.10f);
+                const float g=industrial?(0.25f+life*0.18f):(0.16f+0.025f*float((h>>6)&3u)+life*0.18f);
+                const float b=industrial?(0.15f+life*0.08f):(0.20f+0.03f*float((h>>9)&3u)+life*0.08f);
                 drawRect2D(hud,x0+mx*cell+1.0f,y0+mz*cell+1.0f,
                            x0+(mx+1)*cell-1.0f,y0+(mz+1)*cell-1.0f,
                            r,g,b,0.92f);
@@ -1327,10 +1710,12 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
             const int signedX=mx-(chunkCount/2);
             const int signedZ=mz-(chunkCount/2);
             const uint32_t h=chunkHash(signedX,signedZ);
+            const int population=ecosystemChunkPopulation(signedX,signedZ);
             const bool industrial=chunkBiomeIsIndustrial(signedX,signedZ);
-            const float r=industrial?0.40f:0.07f+0.025f*float((h>>3)&3u);
-            const float g=industrial?0.24f:0.12f+0.024f*float((h>>6)&3u);
-            const float b=industrial?0.14f:0.18f+0.028f*float((h>>9)&3u);
+            const float life=std::clamp(float(population)/6.0f,0.0f,1.0f);
+            const float r=industrial?(0.40f+life*0.08f):(0.07f+0.025f*float((h>>3)&3u)+life*0.10f);
+            const float g=industrial?(0.24f+life*0.16f):(0.12f+0.024f*float((h>>6)&3u)+life*0.18f);
+            const float b=industrial?(0.14f+life*0.08f):(0.18f+0.028f*float((h>>9)&3u)+life*0.08f);
             drawRect2D(hud,x0+mx*cell+1.0f,y0+mz*cell+1.0f,
                        x0+(mx+1)*cell-1.0f,y0+(mz+1)*cell-1.0f,
                        r,g,b,0.92f);
@@ -1549,6 +1934,11 @@ static void drawHud() {
                0.72f,0.86f,0.92f,0.80f);
     drawText2D(hud,cText,viewportW*0.15f,viewportH*0.90f,2.15f,
                0.64f,0.80f,0.88f,0.78f);
+
+    char ecoText[32]{};
+    std::snprintf(ecoText,sizeof(ecoText),"ECO%d",ecosystemPopulation);
+    drawText2D(hud,ecoText,viewportW*0.30f,viewportH*0.90f,2.15f,
+               0.54f,0.76f,0.68f,0.80f);
 
     const float mapX=viewportW*0.92f;
     const float mapY=viewportH*0.12f;
@@ -1971,6 +2361,7 @@ static void update(float dt) {
         }
     }
 
+    updateEcosystem(dt);
     updateEnemy(dt);
     updateBoss(dt);
 
@@ -2081,6 +2472,7 @@ static void frame() {
     drawGrid(vp);
     drawArenaBlocks(vp);
     drawTestWorldStructures(vp);
+    drawEcosystem(vp);
     if(wreck.active) drawWreck(vp);
     if(enemyRespawn<=0.0f) drawEnemy(vp);
     if(!bossDefeated) drawBoss(vp);
