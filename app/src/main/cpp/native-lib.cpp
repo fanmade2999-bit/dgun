@@ -125,11 +125,16 @@ static GLuint cubeVbo=0;
 static int viewportW=1, viewportH=1;
 
 static float px=0.0f, pz=0.0f;
-static float yaw=0.0f, aimPitch=0.72f;
+static float yaw=0.0f, aimPitch=0.18f;
 
 static float heat=0.0f;
 static float playerHp=100.0f;
 static float respawnTimer=0.0f;
+
+// Overall chassis integrity prevents the displayed HP from stalling simply
+// because the current attack angle keeps landing on an already-destroyed limb.
+// Part damage remains authoritative for salvage and local component condition.
+static float chassisIntegrity=100.0f;
 
 // ULTRON-style remote body continuity prototype.
 enum PlayerPart : int {
@@ -555,7 +560,16 @@ static void drawLaser(const Mat4& vp) {
     };
 
     const LaserTrace trace=traceLaser(start,dir);
-    const Vec3 end=add(start,mul(dir,trace.distance));
+
+    float visibleDistance=trace.distance;
+    if(dir.y<0.0f) {
+        const float groundDistance=start.y/(-dir.y);
+        if(groundDistance>0.02f) {
+            visibleDistance=std::min(visibleDistance,groundDistance);
+        }
+    }
+
+    const Vec3 end=add(start,mul(dir,visibleDistance));
 
     // Three very cheap lines make the laser much more visible on devices where
     // glLineWidth() is effectively fixed at one pixel.
@@ -870,7 +884,9 @@ static void updateAim(float x, float y) {
 
     lastAimX=x;
     lastAimY=y;
-    aimPitch=std::clamp(aimPitch,0.15f,1.15f);
+    // Prevent the cannon from being dragged nearly straight into the ground.
+    // Negative values aim slightly upward; positive values aim downward.
+    aimPitch=std::clamp(aimPitch,-0.25f,0.38f);
 }
 
 static Vec3 playerPartCenter(int part) {
@@ -913,7 +929,9 @@ static void resetPlayerBody() {
         playerParts[i].hp=PLAYER_PART_DEFS[i].maxHp;
     }
     playerHp=100.0f;
+    chassisIntegrity=100.0f;
     heat=0.0f;
+    aimPitch=0.18f;
 }
 
 static void storeDestroyedWreck() {
@@ -987,11 +1005,21 @@ static void updateEnemy(float dt) {
 
         const int appliedPart = miniBotMode ? PART_CORE : (hitPart>=0 ? hitPart : PART_CORE);
         const float partDamage = miniBotMode ? 9.0f : (appliedPart==PART_HEAD ? 10.0f : 7.0f);
-        playerParts[appliedPart].hp=std::max(0.0f,playerParts[appliedPart].hp-partDamage);
-        playerHp=calculatePlayerHp();
+
+        // Localized damage: the struck component takes the full hit.
+        playerParts[appliedPart].hp=
+            std::max(0.0f,playerParts[appliedPart].hp-partDamage);
+
+        // A small amount of structural shock always reaches the chassis.
+        // This keeps the overall HP responsive even when an external part has
+        // already been destroyed and is skipped by the hitbox selector.
+        const float structuralDamage = miniBotMode ? 8.0f : 2.25f;
+        chassisIntegrity=std::max(0.0f,chassisIntegrity-structuralDamage);
+
+        playerHp=std::min(calculatePlayerHp(),chassisIntegrity);
         playerHitFlash=0.12f;
 
-        if(playerHp<=0.0f) {
+        if(playerHp<=0.0f || chassisIntegrity<=0.0f) {
             beginPlayerDeath();
         }
     }
@@ -1010,6 +1038,7 @@ static void update(float dt) {
             px=0.0f;
             pz=0.0f;
             yaw=0.0f;
+            aimPitch=0.18f;
 
             if(spareBodies>0) {
                 // Consciousness returns to the main base, which manufactures or
@@ -1074,10 +1103,16 @@ static void update(float dt) {
             -std::cos(yaw)*horiz
         };
         const LaserTrace trace=traceLaser(start,dir);
+        float maxBeamDistance=trace.distance;
+        if(dir.y<0.0f) {
+            const float groundDistance=start.y/(-dir.y);
+            if(groundDistance>0.02f) maxBeamDistance=std::min(maxBeamDistance,groundDistance);
+        }
+
         const Vec3 toEnemy={enemyX-start.x,0.95f-start.y,enemyZ-start.z};
         const float along=dot(toEnemy,dir);
 
-        if(along>0.0f && along<=trace.distance+0.05f && along<LASER_MAX_RANGE) {
+        if(along>0.0f && along<=maxBeamDistance+0.05f && along<LASER_MAX_RANGE) {
             const Vec3 closest=add(start,mul(dir,along));
             const Vec3 enemyCenter={enemyX,0.95f,enemyZ};
             const float d2=dot(sub(enemyCenter,closest),sub(enemyCenter,closest));
@@ -1204,7 +1239,7 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_fanmade_dg_MainActivity_00024NativeBridge_init(JNIEnv*,jclass) {
     dg::initGL();
-    __android_log_print(ANDROID_LOG_INFO,"DG-0004","Native renderer initialized");
+    __android_log_print(ANDROID_LOG_INFO,"DG-0005","Native renderer initialized");
 }
 
 extern "C" JNIEXPORT void JNICALL
