@@ -1,27 +1,35 @@
-# DG Build 0001
+# DG Build 0002
 
-First Android engineering slice for the Destroy Gunners-inspired project.
+First playable Android combat slice for the Destroy Gunners-inspired project.
 
-## What is in 0001
+## 0002
 
 - Native C++17 game core and OpenGL ES 2.0 renderer.
-- One controllable mech in a 40 x 40 meter test arena.
-- Third-person camera with movement.
-- Left-side virtual joystick: hold and drag to move continuously.
-- Right-side touch area: hold to fire the laser.
-- Heat mechanic and simple cooldown.
-- One target dummy that resets when hit.
-- No external textures, models, audio, or third-party runtime dependencies.
-- Java is only the Android shell; gameplay/rendering lives in C++.
+- Procedural multi-part mech silhouette: torso, head, shoulders, arms, legs, cannon.
+- Third-person camera.
+- Left virtual joystick for continuous movement.
+- Right touch control for independent aim/yaw and cannon pitch.
+- Correct Android multi-touch routing, so movement and firing can happen simultaneously.
+- Hold-to-fire laser with heat buildup and cooldown.
+- Laser collision and enemy damage.
+- Enemy pursuit/orbit behavior.
+- Enemy attack cycle and player damage.
+- Hit flashes and automatic player respawn.
+- Low-cost arena cover/landmark blocks.
+- HP and heat HUD bars plus targeting reticle.
+- No external runtime assets yet; geometry is procedural.
 
-## Intended direction after 0001
+## Intended direction
 
-0002: better mech model + aiming, enemy pursuit, hit reactions.
-0003: component/equipment inventory and UNKNOWN EQUIPMENT discovery.
-0004: first facility + persistent world save.
+0003: equipment/components system and UNKNOWN EQUIPMENT discovery.
+0004: first explorable facility and persistent world save.
+Later: world generation, named facilities, bosses, rare/iconic equipment, and the persistent exploration loop.
 
-## Build requirements
+## Build / test
 
-This project requires the Android SDK, Android SDK Build-Tools, Android NDK, CMake, and a Gradle/Android Studio environment capable of building an Android application. The ChatGPT execution environment used for this artifact does not currently contain the Android SDK/NDK, so the APK was not compiled inside the conversation runtime.
+Manus is monitoring the source and handling compilation.
 
-Recommended first target: an Android emulator using the Test Android Apps / Emulator QA tooling, followed by a physical-device pass.
+This project requires an Android SDK, Android SDK Build-Tools, Android NDK, CMake, and a Gradle/Android environment capable of building the application. The ChatGPT runtime is not the compiler host for the APK in this workflow.
+
+The intended verification loop is:
+source change -> Manus compile -> Android emulator QA -> device test -> performance profiling.
