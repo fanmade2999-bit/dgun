@@ -1,35 +1,43 @@
-# DG Build 0002
+# DG Build 0003
 
-First playable Android combat slice for the Destroy Gunners-inspired project.
+First playable Android combat slice with clarified touch controls and physical arena obstacles.
 
-## 0002
+## 0003 changes
 
-- Native C++17 game core and OpenGL ES 2.0 renderer.
-- Procedural multi-part mech silhouette: torso, head, shoulders, arms, legs, cannon.
-- Third-person camera.
-- Left virtual joystick for continuous movement.
-- Right touch control for independent aim/yaw and cannon pitch.
-- Correct Android multi-touch routing, so movement and firing can happen simultaneously.
-- Hold-to-fire laser with heat buildup and cooldown.
-- Laser collision and enemy damage.
-- Enemy pursuit/orbit behavior.
-- Enemy attack cycle and player damage.
-- Hit flashes and automatic player respawn.
-- Low-cost arena cover/landmark blocks.
-- HP and heat HUD bars plus targeting reticle.
-- No external runtime assets yet; geometry is procedural.
+- **Blue bar = HEAT**, now explicitly labeled.
+- **Green bar = HP**, now explicitly labeled.
+- **MOVE** label for the left virtual joystick.
+- **AIM** label for the right-side aim area.
+- **FIRE** label and dedicated fire button on the lower-right.
+- Swiping in the AIM area **does not fire**.
+- Firing occurs only when the explicit FIRE control is pressed.
+- Proper simultaneous MOVE + AIM/FIRE multitouch remains supported.
+- Player collision against all current arena obstacle blocks.
+- Enemy collision against current arena obstacle blocks.
+- Aim pitch now responds to swipe delta instead of absolute screen position.
+- Player respawn no longer destroys the active movement pointer, so holding the joystick through a reboot does not permanently lock movement.
+- Firing is cleared on death so the mech does not automatically resume firing after reboot.
+- Android version bumped to 0.0.3 / versionCode 3.
+
+## Controls
+
+**MOVE:** hold/drag the left circular control.
+
+**AIM:** swipe anywhere in the right-side area above/away from the FIRE button.
+
+**FIRE:** press and hold the lower-right FIRE button.
+
+MOVE + AIM + FIRE can be used together with multiple fingers.
 
 ## Intended direction
 
-0003: equipment/components system and UNKNOWN EQUIPMENT discovery.
-0004: first explorable facility and persistent world save.
+0004: equipment/components system and UNKNOWN EQUIPMENT discovery.
+0005: first explorable facility and persistent world save.
 Later: world generation, named facilities, bosses, rare/iconic equipment, and the persistent exploration loop.
 
 ## Build / test
 
 Manus is monitoring the source and handling compilation.
 
-This project requires an Android SDK, Android SDK Build-Tools, Android NDK, CMake, and a Gradle/Android environment capable of building the application. The ChatGPT runtime is not the compiler host for the APK in this workflow.
-
-The intended verification loop is:
-source change -> Manus compile -> Android emulator QA -> device test -> performance profiling.
+Verification loop:
+source change -> Manus compile -> Android emulator QA -> physical-device test -> performance profiling.
