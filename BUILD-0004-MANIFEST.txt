@@ -1,0 +1,36 @@
+BUILD: 0004
+APP ID: com.fanmade.dg
+VERSION: 0.0.4
+VERSION CODE: 4
+
+REMOTE BODY FOUNDATION
+- Player consciousness is decoupled from one permanent chassis.
+- Destroyed mech remains as a wreck at the death location.
+- Spare assembled bodies tracked.
+- Death consumes a spare body when available.
+- No spare chassis => temporary mini recovery bot mode.
+
+BODY DAMAGE / SALVAGE
+- Core, head, left/right arm, left/right leg, weapon have separate HP.
+- Enemy attacks select a body-part hitbox.
+- Wreck stores per-part remaining HP.
+- Salvage percentage is derived from surviving component condition.
+- High local damage reduces salvage disproportionately.
+
+LASER
+- Visible core beam restored.
+- Additional low-cost glow lines and muzzle pulse.
+- Material-specific obstacle penetration resistance.
+- Light debris can be penetrated.
+- Dense structures reduce penetration/energy.
+- Hard barrier stops beam.
+- Laser damage uses the same penetration trace as the visual.
+
+WORLD FOUNDATION
+- Existing arena obstacle collision retained.
+- Base land/orbit distinction and real fabrication/salvage economy intentionally left for the persistent-world phase.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS COMPILES AND TESTS
+- NEXT STEP: COMPILE + EMULATOR QA
