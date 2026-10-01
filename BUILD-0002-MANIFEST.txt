@@ -1,0 +1,45 @@
+BUILD: 0002
+APP ID: com.fanmade.dg
+VERSION: 0.0.2
+PLATFORM: Android
+ENGINE CORE: C++17
+RENDERER: OpenGL ES 2.0
+
+PLAYER:
+- Procedural multi-part mech silhouette
+- Independent aim/yaw input
+- Adjustable cannon pitch
+- Movement remains independent from aim
+
+COMBAT:
+- Hold-to-fire laser
+- Heat buildup/cooldown
+- Laser damage and target collision
+- Enemy HP and respawn
+- Enemy pursuit/orbit behavior
+- Enemy attack cycle and player damage
+- Hit flashes
+- Player respawn
+
+INPUT:
+- Proper Android multi-touch pointer routing
+- Left pointer = movement
+- Right pointer = aim + fire
+- Movement and firing can be used simultaneously
+
+WORLD:
+- 40 x 40 test arena
+- Low-cost cover/landmark blocks
+- Third-person camera
+
+HUD:
+- HP bar
+- Heat bar
+- Reticle
+- Virtual movement guide
+- Fire/aim control guide
+
+STATUS:
+- SOURCE PUSHED TO MAIN
+- MANUS IS THE BUILD/COMPILATION MONITOR
+- APK COMPILATION/EMULATOR VALIDATION PENDING
