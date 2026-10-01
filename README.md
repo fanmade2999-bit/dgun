@@ -1,4 +1,4 @@
-# DG Build 0008
+# DG Build 0009
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
@@ -45,6 +45,12 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Close to the facility + ACT identifies the unknown equipment.
 - This is intentionally location-driven rather than random-stat spam.
 
+### Chunked toroidal procedural world
+- The 1024 × 1024 world is partitioned into **16 × 16 tile chunks** (32 world units per chunk), giving a 32 × 32 chunk torus.
+- Chunk coordinates and local tile coordinates are shown in the HUD.
+- Chunk borders are rendered around the active area for debugging/navigation.
+- Terrain remains deterministic: the same chunk/tile coordinates regenerate the same terrain.
+
 ### Toroidal procedural world
 - The playable world is now a finite **128 × 128 world-unit torus**.
 - Moving past the eastern boundary wraps to the western side; the same works north/south.
@@ -52,6 +58,13 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - The renderer only draws a local generated window around the player, so the world can be larger than the visible area without drawing the entire map.
 - World interactions, enemy pursuit, boss pursuit, and legacy landmarks use shortest toroidal distance.
 - Seam rendering uses the nearest wrapped image so landmarks and entities remain visible when crossing the boundary.
+
+### Coordinates + expandable minimap
+- Live **X/Y/Z** coordinates are displayed.
+- Current chunk and local tile coordinates are displayed alongside them.
+- A compact minimap shows nearby chunks and persistent landmark markers.
+- Tapping **MAP** expands it into the full 32 × 32 chunk world map.
+- The expanded map highlights the current chunk and shows base/facility/boss positions.
 
 ### Landmark boss + equipment progression
 - A large persistent boss now lives at a fixed world landmark.
