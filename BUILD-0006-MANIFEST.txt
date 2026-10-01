@@ -1,7 +1,7 @@
-BUILD: 0006
+BUILD: 0007
 APP ID: com.fanmade.dg
-VERSION: 0.0.6
-VERSION CODE: 6
+VERSION: 0.0.7
+VERSION CODE: 7
 
 INTEGRATED SYSTEMS
 - Movement + independent aim + dedicated fire.
@@ -18,6 +18,8 @@ INTEGRATED SYSTEMS
 - Discovery facility with UNKNOWN EQUIPMENT pod.
 - Location-based equipment identification.
 - Slow body fabrication using scarce components.
+- Persistent landmark boss with one-time progression reward.
+- UNKNOWN EQUIPMENT now upgrades the LANCE laser's combat behavior.
 
 TEST CONTROLS
 - MOVE: left joystick.
@@ -33,6 +35,7 @@ TEST WORLD
 - Home base at world origin.
 - Discovery facility at a separate world location.
 - Current arena obstacles remain collision-enabled.
+- Landmark boss at the far sector.
 - Laser penetration resistance differs per obstacle.
 
 STATUS
