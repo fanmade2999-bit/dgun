@@ -1,0 +1,50 @@
+BUILD: 0010
+APP ID: com.fanmade.dg
+VERSION: 0.1.0
+VERSION CODE: 10
+
+INTEGRATED SYSTEMS
+- Movement + independent aim + dedicated fire.
+- Multi-touch control roles.
+- Enemy pursuit/attack and per-part damage.
+- Chassis integrity and reliable death.
+- Visible laser with obstacle-aware penetration.
+- Physical wreck persistence during the prototype session.
+- Body pool with multiple assembled chassis.
+- Base body swapping.
+- Recovery bot fallback when assembled bodies are exhausted.
+- Part-dependent salvage.
+- SCRAP/CIRCUIT resource economy.
+- Discovery facility with UNKNOWN EQUIPMENT pod.
+- Location-based equipment identification.
+- LANCE equipment progression that changes laser damage and heat.
+- Persistent landmark boss with one-time progression reward.
+- Deterministic procedural terrain.
+- 1024 × 1024 toroidal world.
+- 32 × 32 chunk torus.
+- 16 × 16 tiles per chunk.
+- Live X/Y/Z coordinates.
+- Current chunk + local tile coordinates.
+- Compact nearby-chunk minimap.
+- Expandable full-world chunk map.
+- Autonomous background ecosystem.
+- Grazers, scavengers, hunters.
+- Hunger, energy, age, predation, starvation and reproduction.
+- Corpse lifecycle and scavenging.
+- World-wide simulation independent of player location.
+- Nearby-only ecosystem rendering with continued off-screen simulation.
+- Minimap ecosystem population-density shading.
+
+ECOLOGY TEST
+- Start anywhere; ecosystem simulation begins across the entire torus.
+- Move away from visible actors and wait.
+- Return later and observe changed positions and population.
+- Watch hunters pursue non-hunter prey.
+- Watch dead actors remain as short-lived corpses that scavengers can consume.
+- Observe reproduction filling empty ecosystem slots up to the population cap.
+- Confirm the player never needs to be nearby for these changes to happen.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA + PHYSICAL DEVICE TEST
