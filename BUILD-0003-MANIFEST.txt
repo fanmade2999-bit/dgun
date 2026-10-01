@@ -1,0 +1,33 @@
+BUILD: 0003
+APP ID: com.fanmade.dg
+VERSION: 0.0.3
+VERSION CODE: 3
+
+USER FEEDBACK FIXES
+- Blue bar identified as HEAT.
+- Green bar identified as HP.
+- MOVE control labeled.
+- AIM area labeled.
+- Dedicated FIRE button labeled.
+
+TOUCH
+- Right-side swiping no longer triggers laser.
+- AIM and FIRE are separate controls.
+- Multi-touch supports MOVE + AIM/FIRE simultaneously.
+
+COLLISION
+- Player blocked by current arena obstacles.
+- Enemy movement blocked by current arena obstacles.
+
+AIM
+- Horizontal and vertical aiming use swipe deltas.
+
+DEATH / RESPawn
+- Movement pointer survives the disabled/reboot interval.
+- Movement can resume without permanently locking after HP reaches zero.
+- Firing is cleared when the player is disabled.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: COMPILE, INSTALL, AND TEST 0003
