@@ -1376,8 +1376,9 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
 static void drawHud() {
     const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
 
-    // Mini map is always available and expands in place.
-    drawMinimap(hud,mapExpanded);
+    // Compact minimap stays behind the gameplay HUD. The expanded map is
+    // composited last so it behaves like a real map overlay.
+    if(!mapExpanded) drawMinimap(hud,false);
 
     glDisable(GL_DEPTH_TEST);
 
@@ -1531,15 +1532,20 @@ static void drawHud() {
     // Wrapped world coordinates + chunk/local-tile coordinates.
     char xText[32]{};
     char zText[32]{};
+    char yText[32]{};
     char cText[32]{};
+    const int worldY=int(std::round(tileHeight(floorTile(px),floorTile(pz))));
     std::snprintf(xText,sizeof(xText),"X%d",(int)std::round(wrapWorld(px)));
+    std::snprintf(yText,sizeof(yText),"Y%d",worldY);
     std::snprintf(zText,sizeof(zText),"Z%d",(int)std::round(wrapWorld(pz)));
     std::snprintf(cText,sizeof(cText),"C%d,%d T%d,%d",
                   chunkCoord(px),chunkCoord(pz),
                   chunkLocalTile(px),chunkLocalTile(pz));
     drawText2D(hud,xText,viewportW*0.02f,viewportH*0.90f,2.4f,
                0.72f,0.86f,0.92f,0.80f);
-    drawText2D(hud,zText,viewportW*0.08f,viewportH*0.90f,2.4f,
+    drawText2D(hud,yText,viewportW*0.08f,viewportH*0.90f,2.4f,
+               0.72f,0.86f,0.92f,0.80f);
+    drawText2D(hud,zText,viewportW*0.14f,viewportH*0.90f,2.4f,
                0.72f,0.86f,0.92f,0.80f);
     drawText2D(hud,cText,viewportW*0.15f,viewportH*0.90f,2.15f,
                0.64f,0.80f,0.88f,0.78f);
@@ -1566,6 +1572,10 @@ static void drawHud() {
     } else if(nearPoint(px,pz,BASE_X,BASE_Z,2.8f) && fabricationSlot<0) {
         drawText2D(hud,"BODY",viewportW*0.42f,viewportH*0.18f,2.6f,
                    0.75f,0.88f,0.96f,0.82f);
+    }
+
+    if(mapExpanded) {
+        drawMinimap(hud,true);
     }
 
     glEnable(GL_DEPTH_TEST);
