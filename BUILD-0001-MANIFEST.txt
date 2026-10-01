@@ -1,0 +1,11 @@
+BUILD: 0001
+APP ID: com.fanmade.dg
+VERSION: 0.0.1
+PLATFORM: Android
+ENGINE CORE: C++17
+RENDERER: OpenGL ES 2.0
+GAMEPLAY: native C++
+INPUT: Android touch -> JNI -> C++
+FEATURES: mech movement, third-person camera, laser, heat, target dummy
+ASSETS: procedural geometry only
+STATUS: SOURCE COMPLETE; APK NOT COMPILED IN THIS RUNTIME (Android SDK/NDK absent)
