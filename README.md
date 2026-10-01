@@ -1,4 +1,4 @@
-# DG Build 0009
+# DG Build 0010
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
@@ -59,6 +59,16 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - World interactions, enemy pursuit, boss pursuit, and legacy landmarks use shortest toroidal distance.
 - Seam rendering uses the nearest wrapped image so landmarks and entities remain visible when crossing the boundary.
 
+### Autonomous ecosystem
+- A world-owned ecosystem now runs independently of the player.
+- 30 autonomous actors are initially distributed across the full world; the simulation can grow to 48.
+- Grazers seek food patches, hunters choose prey and feed, and scavengers seek carcasses.
+- Hunger, energy, age, local movement, predation, starvation, reproduction, and corpses are simulated.
+- The ecosystem advances on a background simulation clock even when the player is far away, dead, or viewing the expanded map.
+- Actors use toroidal shortest-distance movement and can cross world seams normally.
+- Only nearby actors are rendered for performance; their off-screen simulation continues.
+- Minimap cells include population-density shading so the larger world has visible life patterns.
+
 ### Coordinates + expandable minimap
 - Live **X/Y/Z** coordinates are displayed.
 - Current chunk and local tile coordinates are displayed alongside them.
@@ -91,14 +101,15 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 8. Visit the discovery facility and press **ACT** again. Confirm the LANCE level increases and the laser behavior changes.
 9. Return to base. With an empty body slot and sufficient resources, press **ACT** and watch the fabrication timer.
 10. After fabrication, press **SWAP** and confirm the newly fabricated body is available.
-11. Exhaust all assembled bodies through deaths and confirm the game falls back to the temporary recovery bot.
+11. Observe wildlife/mechanical life around the world. Move away from a group, spend time elsewhere, then return and confirm actors have moved, reproduced, starved, hunted, or left corpses without requiring the player to be nearby.
+12. Exhaust all assembled bodies through deaths and confirm the game falls back to the temporary recovery bot.
 
 ## Architecture direction
 
 The prototype now has the core shape of:
 **remote consciousness -> physical body -> localized damage -> abandoned wreck -> salvage -> scarce components -> fabrication -> replacement body -> continued exploration**
 
-Persistent saves, a larger procedural terrain/biome vocabulary, named facilities beyond the test site, more boss variants, a persistent world map, equipment rarity/identity beyond the prototype LANCE path, and deeper salvage/component inventories remain later systems.
+Persistent saves for ecosystem state, a larger procedural terrain/biome vocabulary, named facilities beyond the test site, more species/food chains, more boss variants, a persistent world map, equipment rarity/identity beyond the prototype LANCE path, and deeper salvage/component inventories remain later systems.
 
 ## Build / test
 
