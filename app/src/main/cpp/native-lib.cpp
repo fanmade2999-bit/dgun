@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
+#include <cstdio>
 
 namespace dg {
 
@@ -129,6 +130,58 @@ static float yaw=0.0f, aimPitch=0.72f;
 static float heat=0.0f;
 static float playerHp=100.0f;
 static float respawnTimer=0.0f;
+
+// ULTRON-style remote body continuity prototype.
+enum PlayerPart : int {
+    PART_CORE=0,
+    PART_HEAD,
+    PART_LEFT_ARM,
+    PART_RIGHT_ARM,
+    PART_LEFT_LEG,
+    PART_RIGHT_LEG,
+    PART_WEAPON,
+    PART_COUNT
+};
+
+struct BodyPartState {
+    float hp;
+    float maxHp;
+};
+
+struct BodyPartDef {
+    Vec3 localCenter;
+    float radius;
+    float maxHp;
+};
+
+static constexpr BodyPartDef PLAYER_PART_DEFS[PART_COUNT] = {
+    {{ 0.00f, 0.95f,  0.00f}, 0.95f, 34.0f}, // core
+    {{ 0.00f, 1.85f, -0.03f}, 0.50f, 12.0f}, // head
+    {{-1.08f, 0.55f,  0.00f}, 0.52f, 10.0f}, // left arm
+    {{ 1.08f, 0.55f,  0.00f}, 0.52f, 10.0f}, // right arm
+    {{-0.40f,-0.10f,  0.00f}, 0.62f, 12.0f}, // left leg
+    {{ 0.40f,-0.10f,  0.00f}, 0.62f, 12.0f}, // right leg
+    {{ 0.00f, 1.45f, -1.00f}, 0.82f, 10.0f}  // weapon
+};
+
+static BodyPartState playerParts[PART_COUNT] = {
+    {34.0f,34.0f}, {12.0f,12.0f},
+    {10.0f,10.0f}, {10.0f,10.0f},
+    {12.0f,12.0f}, {12.0f,12.0f},
+    {10.0f,10.0f}
+};
+
+static int spareBodies=2;
+static int bodyGeneration=1;
+static bool miniBotMode=false;
+
+struct WreckState {
+    bool active=false;
+    float x=0.0f, z=0.0f, yaw=0.0f;
+    float salvagePercent=0.0f;
+    BodyPartState parts[PART_COUNT]{};
+};
+static WreckState wreck;
 
 static int movePointer=-1;
 static int aimPointer=-1;
@@ -293,6 +346,106 @@ static void drawArenaBlocks(const Mat4& vp) {
     drawCube(vp,{8.0f,0.5f,-2.5f},{0.8f,0.5f,2.2f},0.5f,0.12f,0.17f,0.22f);
 }
 
+struct BeamObstacle {
+    float minX, maxX;
+    float minZ, maxZ;
+    float resistance;
+};
+
+static constexpr BeamObstacle BEAM_OBSTACLES[] = {
+    // Light debris / thin cover: laser can punch through with little loss.
+    {-8.40f,-5.60f,-5.20f,-2.80f, 0.35f},
+    // Dense concrete-like block.
+    {-8.00f,-4.00f, 5.00f, 7.00f, 1.20f},
+    // Heavy industrial structure.
+    { 5.80f, 8.20f, 3.80f, 6.20f, 2.00f},
+    // Thick metal barrier.
+    { 7.20f, 8.80f,-4.70f,-0.30f, 2.60f}
+};
+
+static constexpr float LASER_PENETRATION=2.20f;
+static constexpr float LASER_MAX_RANGE=16.0f;
+
+static float rayBoxEntryDistance(Vec3 start, Vec3 dir, const BeamObstacle& b) {
+    float tmin=0.0f;
+    float tmax=LASER_MAX_RANGE;
+
+    const float ox=start.x;
+    const float oz=start.z;
+    const float dx=dir.x;
+    const float dz=dir.z;
+
+    auto slab = [](float o,float d,float minV,float maxV,float& lo,float& hi) {
+        if(std::fabs(d)<0.00001f) {
+            return o>=minV && o<=maxV;
+        }
+        float a=(minV-o)/d;
+        float b=(maxV-o)/d;
+        if(a>b) std::swap(a,b);
+        lo=std::max(lo,a);
+        hi=std::min(hi,b);
+        return lo<=hi;
+    };
+
+    if(!slab(ox,dx,b.minX,b.maxX,tmin,tmax)) return -1.0f;
+    if(!slab(oz,dz,b.minZ,b.maxZ,tmin,tmax)) return -1.0f;
+    if(tmax<0.0f || tmin>LASER_MAX_RANGE) return -1.0f;
+    return std::max(0.0f,tmin);
+}
+
+struct LaserTrace {
+    float distance=LASER_MAX_RANGE;
+    float remainingPenetration=LASER_PENETRATION;
+    float energy=1.0f;
+};
+
+static LaserTrace traceLaser(Vec3 start,Vec3 dir) {
+    LaserTrace result{};
+    float nearestCut=LASER_MAX_RANGE;
+
+    // Sort-like repeated selection without heap allocation. There are only four
+    // current obstacles, so a small fixed pass keeps the mobile path cheap.
+    bool used[sizeof(BEAM_OBSTACLES)/sizeof(BEAM_OBSTACLES[0])]{};
+    float cursor=0.0f;
+    float penetration=LASER_PENETRATION;
+    float energy=1.0f;
+
+    for(size_t pass=0; pass<sizeof(BEAM_OBSTACLES)/sizeof(BEAM_OBSTACLES[0]); pass++) {
+        int best=-1;
+        float bestT=LASER_MAX_RANGE+1.0f;
+
+        for(size_t i=0;i<sizeof(BEAM_OBSTACLES)/sizeof(BEAM_OBSTACLES[0]);i++) {
+            if(used[i]) continue;
+            float t=rayBoxEntryDistance(start,dir,BEAM_OBSTACLES[i]);
+            if(t<0.0f || t<cursor-0.001f) continue;
+            if(t<bestT) {
+                bestT=t;
+                best=(int)i;
+            }
+        }
+
+        if(best<0) break;
+        used[best]=true;
+
+        const float resistance=BEAM_OBSTACLES[best].resistance;
+        if(penetration < resistance) {
+            nearestCut=bestT+0.04f;
+            penetration=0.0f;
+            energy*=0.12f;
+            break;
+        }
+
+        penetration-=resistance;
+        energy*=std::max(0.18f,1.0f-resistance*0.22f);
+        cursor=bestT+0.05f;
+    }
+
+    result.distance=std::clamp(nearestCut,0.5f,LASER_MAX_RANGE);
+    result.remainingPenetration=penetration;
+    result.energy=std::clamp(energy,0.0f,1.0f);
+    return result;
+}
+
 static void drawMech(const Mat4& vp) {
     const float bodyR = playerHitFlash>0 ? 0.85f : 0.18f;
     const float bodyG = playerHitFlash>0 ? 0.25f : 0.37f;
@@ -391,7 +544,7 @@ static void drawEnemy(const Mat4& vp) {
 }
 
 static void drawLaser(const Mat4& vp) {
-    if(laserT<=0.0f) return;
+    if(laserT<=0.0f || firePointer<0) return;
 
     const Vec3 start=localOffset({px,0,pz},{0,1.45f,-1.70f},yaw);
     const float horiz=std::cos(aimPitch);
@@ -400,13 +553,39 @@ static void drawLaser(const Mat4& vp) {
         -std::sin(aimPitch),
         -std::cos(yaw)*horiz
     };
-    const Vec3 end=add(start,mul(dir,14.0f));
 
-    const float verts[]={
+    const LaserTrace trace=traceLaser(start,dir);
+    const Vec3 end=add(start,mul(dir,trace.distance));
+
+    // Three very cheap lines make the laser much more visible on devices where
+    // glLineWidth() is effectively fixed at one pixel.
+    const float mainVerts[]={
         start.x,start.y,start.z,
         end.x,end.y,end.z
     };
-    drawLines(vp,verts,2,0.25f,0.95f,1.0f,0.98f);
+    drawLines(vp,mainVerts,2,0.25f,0.95f,1.0f,0.98f);
+
+    const Vec3 side={0.018f,0.0f,0.018f};
+    const float glowVertsA[]={
+        start.x-side.x,start.y+side.y,start.z-side.z,
+        end.x-side.x,end.y+side.y,end.z-side.z
+    };
+    const float glowVertsB[]={
+        start.x+side.x,start.y-side.y,start.z+side.z,
+        end.x+side.x,end.y-side.y,end.z+side.z
+    };
+    const float glow=0.20f+0.35f*trace.energy;
+    drawLines(vp,glowVertsA,2,0.05f,0.55f,0.90f,glow);
+    drawLines(vp,glowVertsB,2,0.05f,0.55f,0.90f,glow);
+
+    // Small muzzle pulse.
+    const float pulse=0.10f+0.12f*std::sin(float(nowSeconds()*60.0));
+    const Vec3 muzzleEnd=add(start,mul(dir,0.55f+pulse));
+    const float muzzle[]={
+        start.x,start.y,start.z,
+        muzzleEnd.x,muzzleEnd.y,muzzleEnd.z
+    };
+    drawLines(vp,muzzle,2,0.60f,1.0f,1.0f,0.95f);
 }
 
 static void drawEnemyLaser(const Mat4& vp) {
@@ -465,6 +644,13 @@ static uint8_t glyphBits(char ch,int row) {
     static constexpr uint8_t O[7] = {14,17,17,17,17,17,14};
     static constexpr uint8_t V[7] = {17,17,17,17,17,10,4};
     static constexpr uint8_t W[7] = {17,17,17,21,21,21,10};
+    static constexpr uint8_t B[7] = {30,17,17,30,17,17,30};
+    static constexpr uint8_t D[7] = {30,17,17,17,17,17,30};
+    static constexpr uint8_t Y[7] = {17,17,10,4,4,4,4};
+    static constexpr uint8_t S[7] = {15,16,16,14,1,1,30};
+    static constexpr uint8_t L[7] = {16,16,16,16,16,16,31};
+    static constexpr uint8_t G[7] = {14,17,16,23,17,17,14};
+    static constexpr uint8_t N[7] = {17,25,21,19,17,17,17};
 
     if(row<0 || row>=7) return 0;
     switch(ch) {
@@ -480,6 +666,13 @@ static uint8_t glyphBits(char ch,int row) {
         case 'O': return O[row];
         case 'V': return V[row];
         case 'W': return W[row];
+        case 'B': return B[row];
+        case 'D': return D[row];
+        case 'Y': return Y[row];
+        case 'S': return S[row];
+        case 'L': return L[row];
+        case 'G': return G[row];
+        case 'N': return N[row];
         default: return 0;
     }
 }
@@ -517,6 +710,55 @@ static void drawText2D(const Mat4& hud,const char* text,float x,float y,
     glUniformMatrix4fv(uMvp,1,GL_FALSE,hud.m);
     glUniform4f(uColor,r,g,b,a);
     glDrawArrays(GL_TRIANGLES,0,n/3);
+}
+
+static void drawWreck(const Mat4& vp) {
+    if(wreck.active) {
+        for(int i=0;i<PART_COUNT;i++) {
+            const BodyPartDef& d=PLAYER_PART_DEFS[i];
+            const float fraction=wreck.parts[i].maxHp>0.0f
+                ? std::clamp(wreck.parts[i].hp/wreck.parts[i].maxHp,0.0f,1.0f)
+                : 0.0f;
+            if(fraction<=0.03f) continue;
+
+            const Vec3 p=localOffset(
+                {wreck.x,0,wreck.z},
+                d.localCenter,
+                wreck.yaw
+            );
+            const float damaged=1.0f-fraction;
+            const float s=0.72f+0.18f*fraction;
+
+            drawCube(
+                vp,p,
+                {d.radius*s*0.68f,d.radius*s*0.48f,d.radius*s*0.68f},
+                wreck.yaw,
+                0.08f+0.10f*fraction,
+                0.10f+0.08f*fraction,
+                0.11f+0.06f*fraction
+            );
+
+            // Highly damaged parts are visibly offset, communicating salvage severity.
+            if(damaged>0.45f) {
+                drawCube(
+                    vp,
+                    add(p,{0.08f*std::sin(float(i)),0.06f,0.08f*std::cos(float(i))}),
+                    {0.16f,0.05f,0.16f},
+                    wreck.yaw,
+                    0.18f,0.12f,0.09f,0.75f
+                );
+            }
+        }
+    }
+}
+
+static void drawMiniBot(const Mat4& vp) {
+    if(!miniBotMode || respawnTimer>0.0f) return;
+
+    drawCube(vp,{px,0.45f,pz},{0.25f,0.25f,0.25f},yaw,
+             0.35f,0.48f,0.55f);
+    drawCube(vp,{px,0.78f,pz},{0.16f,0.12f,0.16f},yaw,
+             0.42f,0.66f,0.78f);
 }
 
 static void drawHud() {
@@ -570,6 +812,32 @@ static void drawHud() {
                  firePointer>=0?0.85f:0.48f);
     drawText2D(hud,"FIRE",fireX-39.0f,fireY-10.0f,3.0f,1.0f,1.0f,1.0f,0.95f);
 
+    // Body continuity readout.
+    const float bodyX=viewportW*0.73f;
+    const float bodyY=pad+8.0f;
+    char bodyText[32]{};
+    std::snprintf(bodyText,sizeof(bodyText),"BODY");
+    drawText2D(hud,bodyText,bodyX,bodyY,3.0f,0.70f,0.88f,0.96f,0.82f);
+    char countText[8]{};
+    std::snprintf(countText,sizeof(countText),"%d",spareBodies);
+    drawText2D(hud,countText,bodyX+35.0f,bodyY,3.0f,1.0f,1.0f,1.0f,0.95f);
+
+    if(wreck.active) {
+        char salvage[32]{};
+        std::snprintf(salvage,sizeof(salvage),"SALVAGE");
+        drawText2D(hud,salvage,viewportW*0.73f,pad+32.0f,2.6f,
+                   0.70f,0.78f,0.72f,0.82f);
+        char pct[16]{};
+        std::snprintf(pct,sizeof(pct),"%.0f",wreck.salvagePercent);
+        drawText2D(hud,pct,viewportW*0.73f+48.0f,pad+32.0f,2.6f,
+                   0.85f,0.92f,0.82f,0.95f);
+    }
+
+    if(miniBotMode) {
+        drawText2D(hud,"BOT",viewportW*0.47f,viewportH*0.80f,3.0f,
+                   0.70f,0.86f,0.92f,0.75f);
+    }
+
     glEnable(GL_DEPTH_TEST);
 }
 
@@ -583,6 +851,78 @@ static void updateAim(float x, float y) {
     lastAimX=x;
     lastAimY=y;
     aimPitch=std::clamp(aimPitch,0.15f,1.15f);
+}
+
+static Vec3 playerPartCenter(int part) {
+    return localOffset({px,0,pz},PLAYER_PART_DEFS[part].localCenter,yaw);
+}
+
+static int closestPlayerPartOnRay(Vec3 start,Vec3 dir,float maxDistance) {
+    int best=-1;
+    float bestT=maxDistance+1.0f;
+    for(int i=0;i<PART_COUNT;i++) {
+        if(playerParts[i].hp<=0.0f) continue;
+        const Vec3 center=playerPartCenter(i);
+        const Vec3 rel=sub(center,start);
+        const float t=dot(rel,dir);
+        if(t<0.0f || t>maxDistance) continue;
+        const Vec3 closest=add(start,mul(dir,t));
+        const float d2=dot(sub(center,closest),sub(center,closest));
+        const float radius=PLAYER_PART_DEFS[i].radius;
+        if(d2<=radius*radius && t<bestT) {
+            bestT=t;
+            best=i;
+        }
+    }
+    return best;
+}
+
+static float calculatePlayerHp() {
+    float total=0.0f;
+    float maxTotal=0.0f;
+    for(int i=0;i<PART_COUNT;i++) {
+        total+=std::max(0.0f,playerParts[i].hp);
+        maxTotal+=playerParts[i].maxHp;
+    }
+    return maxTotal>0.0f ? total*100.0f/maxTotal : 0.0f;
+}
+
+static void resetPlayerBody() {
+    for(int i=0;i<PART_COUNT;i++) {
+        playerParts[i].maxHp=PLAYER_PART_DEFS[i].maxHp;
+        playerParts[i].hp=PLAYER_PART_DEFS[i].maxHp;
+    }
+    playerHp=100.0f;
+    heat=0.0f;
+}
+
+static void storeDestroyedWreck() {
+    wreck.active=true;
+    wreck.x=px;
+    wreck.z=pz;
+    wreck.yaw=yaw;
+    wreck.salvagePercent=0.0f;
+
+    float remaining=0.0f;
+    float maxTotal=0.0f;
+    for(int i=0;i<PART_COUNT;i++) {
+        wreck.parts[i]=playerParts[i];
+        remaining+=std::max(0.0f,playerParts[i].hp);
+        maxTotal+=std::max(0.0f,playerParts[i].maxHp);
+    }
+
+    if(maxTotal>0.0f) {
+        // Severe local damage ruins more salvage than simple linear health loss.
+        wreck.salvagePercent=std::pow(std::clamp(remaining/maxTotal,0.0f,1.0f),1.35f)*100.0f;
+    }
+}
+
+static void beginPlayerDeath() {
+    storeDestroyedWreck();
+    miniBotMode=false;
+    respawnTimer=2.20f;
+    laserT=0.0f;
+    firePointer=-1;
 }
 
 static void updateEnemy(float dt) {
@@ -619,9 +959,21 @@ static void updateEnemy(float dt) {
         enemyLaserT=0.12f;
         enemyShotDirX=dx/std::max(0.001f,distance);
         enemyShotDirZ=dz/std::max(0.001f,distance);
-        playerHp=std::max(0.0f,playerHp-7.0f);
+
+        const Vec3 shotStart={enemyX,1.45f,enemyZ};
+        const Vec3 target={px,1.15f,pz};
+        const Vec3 shotDir=norm(sub(target,shotStart));
+        const int hitPart=closestPlayerPartOnRay(shotStart,shotDir,distance+1.0f);
+
+        const int appliedPart = miniBotMode ? PART_CORE : (hitPart>=0 ? hitPart : PART_CORE);
+        const float partDamage = miniBotMode ? 9.0f : (appliedPart==PART_HEAD ? 10.0f : 7.0f);
+        playerParts[appliedPart].hp=std::max(0.0f,playerParts[appliedPart].hp-partDamage);
+        playerHp=calculatePlayerHp();
         playerHitFlash=0.12f;
-        if(playerHp<=0.0f) respawnTimer=1.35f;
+
+        if(playerHp<=0.0f) {
+            beginPlayerDeath();
+        }
     }
 }
 
@@ -638,10 +990,24 @@ static void update(float dt) {
             px=0.0f;
             pz=0.0f;
             yaw=0.0f;
-            playerHp=100.0f;
-            heat=0.0f;
-            // Keep the movement pointer alive. If the player's thumb is still
-            // on the joystick, movement resumes immediately after reboot.
+
+            if(spareBodies>0) {
+                // Consciousness returns to the main base, which manufactures or
+                // readies another scarce chassis and inserts us into it.
+                --spareBodies;
+                ++bodyGeneration;
+                miniBotMode=false;
+                resetPlayerBody();
+            } else {
+                // No complete chassis remains. A small recovery bot becomes the
+                // temporary body and descends to the surface.
+                miniBotMode=true;
+                resetPlayerBody();
+                playerHp=55.0f;
+            }
+
+            // Keep movement pointer alive. If the player's thumb is still on the
+            // joystick, movement resumes immediately after deployment.
         }
     } else {
         const float dead=0.15f;
@@ -658,10 +1024,10 @@ static void update(float dt) {
         const Vec3 right={std::cos(yaw),0,std::sin(yaw)};
         const Vec3 move=add(mul(forward,-my),mul(right,mx));
 
-        const float speed=3.6f;
+        const float speed=miniBotMode ? 2.2f : 3.6f;
         movePlayer(move.x*speed*dt,move.z*speed*dt);
 
-        if(firePointer>=0 && heat<0.92f) {
+        if(!miniBotMode && firePointer>=0 && heat<0.92f) {
             heat=std::min(1.0f,heat+dt*0.92f);
             laserT=0.08f;
         } else {
@@ -676,22 +1042,27 @@ static void update(float dt) {
     playerHitFlash=std::max(0.0f,playerHitFlash-dt);
     enemyHitFlash=std::max(0.0f,enemyHitFlash-dt);
 
-    // Laser hit test: horizontal ray against enemy's small collision sphere.
+    // Laser hit test uses the same obstruction trace as the visual beam.
+    // A low-resistance obstacle can be penetrated; a high-resistance obstacle
+    // stops the beam and prevents the target behind it from taking full damage.
     if(laserT>0.0f && firePointer>=0 && enemyRespawn<=0.0f && respawnTimer<=0.0f) {
         const Vec3 start=localOffset({px,0,pz},{0,1.45f,-1.70f},yaw);
-        const float dirX=std::sin(yaw);
-        const float dirZ=-std::cos(yaw);
-        const float ex=enemyX-start.x;
-        const float ez=enemyZ-start.z;
-        const float along=ex*dirX+ez*dirZ;
+        const float horiz=std::cos(aimPitch);
+        const Vec3 dir={
+            std::sin(yaw)*horiz,
+            -std::sin(aimPitch),
+            -std::cos(yaw)*horiz
+        };
+        const LaserTrace trace=traceLaser(start,dir);
+        const Vec3 toEnemy={enemyX-start.x,0.95f-start.y,enemyZ-start.z};
+        const float along=dot(toEnemy,dir);
 
-        if(along>0.0f && along<15.0f) {
-            const float closestX=start.x+dirX*along;
-            const float closestZ=start.z+dirZ*along;
-            const float hx=enemyX-closestX;
-            const float hz=enemyZ-closestZ;
-            if(hx*hx+hz*hz<1.25f) {
-                enemyHp-=18.0f*dt*60.0f;
+        if(along>0.0f && along<=trace.distance+0.05f && along<LASER_MAX_RANGE) {
+            const Vec3 closest=add(start,mul(dir,along));
+            const Vec3 enemyCenter={enemyX,0.95f,enemyZ};
+            const float d2=dot(sub(enemyCenter,closest),sub(enemyCenter,closest));
+            if(d2<1.65f) {
+                enemyHp-=18.0f*trace.energy*dt*60.0f;
                 enemyHitFlash=0.08f;
                 if(enemyHp<=0.0f) {
                     enemyHp=0.0f;
@@ -731,9 +1102,16 @@ static void frame() {
 
     drawGrid(vp);
     drawArenaBlocks(vp);
+    if(wreck.active) drawWreck(vp);
     if(enemyRespawn<=0.0f) drawEnemy(vp);
-    drawMech(vp);
-    drawLaser(vp);
+
+    if(respawnTimer<=0.0f && !miniBotMode) {
+        drawMech(vp);
+        drawLaser(vp);
+    } else {
+        drawMiniBot(vp);
+    }
+
     drawEnemyLaser(vp);
     drawHud();
 }
@@ -806,7 +1184,7 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_fanmade_dg_MainActivity_00024NativeBridge_init(JNIEnv*,jclass) {
     dg::initGL();
-    __android_log_print(ANDROID_LOG_INFO,"DG-0002","Native renderer initialized");
+    __android_log_print(ANDROID_LOG_INFO,"DG-0004","Native renderer initialized");
 }
 
 extern "C" JNIEXPORT void JNICALL
