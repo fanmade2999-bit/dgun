@@ -1,0 +1,24 @@
+BUILD: 0005
+APP ID: com.fanmade.dg
+VERSION: 0.0.5
+VERSION CODE: 5
+
+BUG FIXES
+- HP no longer stalls merely because the currently selected body-part hitbox is exhausted.
+- Every enemy hit applies localized part damage plus chassis integrity damage.
+- Overall HP is clamped by chassis integrity and per-part condition.
+- New bodies reset HP, chassis integrity, heat, and aim pitch.
+- Vertical aim is clamped to a practical combat range.
+- Downward laser visual stops at the ground rather than disappearing into it.
+- Laser collision uses the same effective 3D beam direction and range.
+
+REGRESSION TESTS FOR MANUS
+1. Take repeated enemy hits and confirm HP continues below previous apparent floor.
+2. Destroy an arm/leg/head and confirm HP still continues to decrease.
+3. Drag AIM strongly downward and confirm beam stays within sensible downward angle.
+4. Hold FIRE while aiming downward and confirm beam does not collapse to hand-range unless the ground is genuinely that close.
+5. Die, respawn, and confirm aim returns to normal plus movement/firing remain available.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
