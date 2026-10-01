@@ -347,6 +347,15 @@ static double nowSeconds() {
     return t;
 }
 
+// Forward declarations for systems whose definitions live later in this
+// single-file prototype.
+static void initializeBodyPool();
+static bool beginFabrication();
+static int findOtherBodySlot();
+static void saveActiveBodyToPool();
+static void loadBodyFromSlot(int slot);
+
+
 static GLuint compileShader(GLenum type, const char* src) {
     GLuint s=glCreateShader(type);
     glShaderSource(s,1,&src,nullptr);
