@@ -2541,6 +2541,7 @@ static void drawMiniBot(const Mat4& vp) {
 }
 
 static bool pointInMapButton(float x,float y,float w,float h) {
+    if(!features.navigationHud) return false;
     const float cx=w*0.92f;
     const float cy=h*0.12f;
     const float radius=h*0.055f;
@@ -2705,6 +2706,7 @@ static void drawMinimalHud(const Mat4& hud) {
     // traversal controls rather than exposing HP/targeting that cannot change.
 
 
+    if(features.player && features.playerMovement) {
     const float joyBaseX=viewportW*0.18f;
     const float joyBaseY=viewportH*0.78f;
     const float joyR=viewportH*0.20f;
@@ -2713,10 +2715,14 @@ static void drawMinimalHud(const Mat4& hud) {
                  0.65f,0.82f,0.95f,0.70f);
     drawText2D(hud,"MOVE",joyBaseX-35.0f,joyBaseY-joyR-23.0f,3.0f,
                0.75f,0.88f,0.95f,0.82f);
+    }
 
+    if(features.player && features.camera) {
     drawText2D(hud,"CAM",viewportW*0.49f,viewportH*0.12f,2.7f,
                0.70f,0.86f,0.96f,0.72f);
+    }
 
+    if(features.player && features.playerJump) {
     const float jumpX=viewportW*0.52f;
     const float jumpY=viewportH*0.78f;
     const float jumpR=viewportH*0.105f;
@@ -2727,7 +2733,9 @@ static void drawMinimalHud(const Mat4& hud) {
                  0.52f);
     drawText2D(hud,"JUMP",jumpX-32.0f,jumpY-10.0f,2.7f,
                1.0f,1.0f,1.0f,0.82f);
+    }
 
+    if(features.player) {
     char coords[48]{};
     std::snprintf(coords,sizeof(coords),"X%d Y%d Z%d",
                   (int)std::round(wrapWorld(px)),
@@ -2735,6 +2743,7 @@ static void drawMinimalHud(const Mat4& hud) {
                   (int)std::round(wrapWorld(pz)));
     drawText2D(hud,coords,viewportW*0.02f,viewportH*0.90f,2.2f,
                0.72f,0.86f,0.92f,0.80f);
+    }
 }
 
 static bool pointInAdminButton(float x,float y,float w,float h) {
@@ -3003,6 +3012,8 @@ static void drawHud() {
     drawAdminButton(hud);
     if(adminOpen) {
         drawAdminPanel(hud);
+        // Keep ADMIN above the panel so this same control always closes it.
+        drawAdminButton(hud);
         drawAdminToast(hud);
         glEnable(GL_DEPTH_TEST);
         return;
@@ -3017,7 +3028,8 @@ static void drawHud() {
         !features.boss &&
         !features.wrecks &&
         !features.navigationHud &&
-        !features.progressionHud;
+        !features.progressionHud &&
+        !features.terrainDebug;
 
     if(minimal) {
         drawMinimalHud(hud);
