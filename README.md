@@ -1,20 +1,50 @@
-# DG Build 0020
+# DG Build 0021
 
-Current development slice remains player + procedural terrain, with the ADMIN switchboard now exposing the major player and gameplay subsystems individually.
+Build 0021 adds an in-game Minecraft-style ADMIN command console for spawning and managing named NPCs and bosses.
 
-## Build 0020 — deeper feature granularity
-- PLAYER is split into MOVE, AIM, JUMP, CAMERA and RESPAWN controls.
-- GAMEPLAY is split into COMBAT, BODY, SALVAGE and GEAR.
-- WORLD retains separate TERRAIN, STRUCT, WEATHER, ECO, ENEMY, BOSS and WRECK switches.
-- UI/SYSTEM retains NAV, PROGRESS, SAVE and DEBUG.
-- Every FeatureFlags field is now represented in the ADMIN registry.
-- Disabling a subsystem clears the input or transient state associated with that subsystem.
-- Body, salvage, equipment and respawn paths no longer depend on one undifferentiated gameplay switch.
-- Save/autosave honors the SAVE switch.
-- Camera range honors the CAMERA switch; movement and jump can be disabled independently.
-- The clean terrain-only startup slice is unchanged: player movement, jump, camera and respawn are on; combat/world/gameplay extras remain off.
+## Command console
+- Open ADMIN and press CMD.
+- The Android shell opens a real text field and the soft keyboard.
+- Suggestions update while typing and can be tapped to complete a command.
+- Native execution is queued onto the game/update thread to avoid UI-thread simulation mutation.
+- Summoned actors are currently session-scoped rather than part of the save format.
+
+### Commands
+- /summon npc <name> [x] [z]
+- /summon boss <name> [x] [z]
+- /summon <name> [x] [z]
+- /list
+- /kill <id|all|npcs|bosses>
+- /clear
+- /tp <x> <z>
+- Coordinates support ~ relative notation.
+
+## NPCs
+- survivor
+- mechanic
+- scientist
+- trader
+- scout
+- medic
+- ranger
+- NPCs have distinct visual variants and wander around their summon point.
+
+## Bosses
+- samurai
+- tyrant
+- dreadnought
+- raptor
+- behemoth
+- sentinel
+- Bosses are larger physical actors that move toward the player.
+
+## Admin integration
+- NPCS and BOSSES+ are separate ADMIN feature switches.
+- Summoning automatically enables the relevant switch.
+- Turning one switch off hides/stops that class of summoned actor without deleting the runtime entities.
 
 ## Previous build history
+
 
 
 
