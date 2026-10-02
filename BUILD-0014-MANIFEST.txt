@@ -1,0 +1,29 @@
+BUILD: 0014
+APP ID: com.fanmade.dg
+VERSION: 0.1.4
+VERSION CODE: 14
+
+NEW IN THIS BUILD
+- Versioned native save file stored in the app's internal files directory.
+- Autosave every 5 seconds during play.
+- Save on Android Activity pause.
+- Restore player position, aim, HP/structure, resources and equipment.
+- Restore assembled-body pool and active chassis condition.
+- Restore fabrication progress and base mode.
+- Restore abandoned mech wreck condition.
+- Restore enemy and persistent landmark boss state.
+- Restore ecosystem chunk resources/population.
+- Restore individual ecosystem actors, needs, groups, dens, targets and corpse timers.
+- Restore global ecosystem clock, weather phase, event history and counters.
+- Atomic temp-file replacement reduces risk of a half-written save.
+
+PERSISTENCE MODEL
+- Terrain remains procedural and deterministic, so it is not duplicated in the save.
+- Mutable world state is serialized into a versioned binary snapshot.
+- Invalid/truncated saves are ignored rather than partially applied.
+- Save schema is versioned so future incompatible changes can intentionally migrate or reset it.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA
