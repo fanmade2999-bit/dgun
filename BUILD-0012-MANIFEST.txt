@@ -1,0 +1,50 @@
+BUILD: 0012
+APP ID: com.fanmade.dg
+VERSION: 0.1.2
+VERSION CODE: 12
+
+INTEGRATED SYSTEMS
+- Core mech movement, aiming and combat.
+- Body part damage and chassis integrity.
+- Physical wrecks, salvage and fabrication.
+- UNKNOWN EQUIPMENT and LANCE progression.
+- Persistent landmark boss.
+- Deterministic 1024 × 1024 toroidal procedural world.
+- 32 × 32 chunk torus.
+- 16 × 16 tiles per chunk.
+- Live X/Y/Z and chunk/tile coordinates.
+- Compact and expandable minimap.
+- Global autonomous ecosystem.
+- Grazers, scavengers and hunters.
+- Individual creature hunger, thirst, energy, fear and age.
+- Creature group identity and loyalty.
+- Herd cohesion and hunter pack target sharing.
+- Personal den/home locations and night resting.
+- Chunk food, water, shelter, danger and population state.
+- Water-seeking behavior.
+- Ecological carrying capacity.
+- Crowding-driven migration.
+- Food-chain predation and corpse scavenging.
+- Reproduction constrained by local ecology.
+- Global day/night cycle.
+- Global rain/weather cycle.
+- Food/water regeneration affected by rain.
+- Recent autonomous world-event history.
+- Expanded-map event markers.
+- Nearby-only rendering of ecosystem actors while their simulation continues globally.
+
+ECOLOGY TEST
+- Observe a herd and note its group movement.
+- Leave the herd and travel elsewhere.
+- Return after different world-cycle phases and compare the herd.
+- Trigger enough predator pressure to make grazers move away.
+- Observe thirsty creatures travel toward water-rich chunks.
+- Observe predators share targets within their groups.
+- Let several creatures occupy one chunk and verify migration can occur as carrying capacity is reached.
+- Open the full map and look for recent ecosystem activity markers.
+- Confirm none of these behaviors require the player to be present at the event location.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA + PHYSICAL DEVICE TEST
