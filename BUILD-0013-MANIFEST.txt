@@ -1,0 +1,37 @@
+BUILD: 0013
+APP ID: com.fanmade.dg
+VERSION: 0.1.3
+VERSION CODE: 13
+
+NEW IN THIS BUILD
+- Ecosystem population increased to 48 initial / 96 session capacity.
+- Individual creature player-awareness memory fields.
+- Player weapon noise is an environmental stimulus.
+- Grazers and scavengers can flee from player presence/noise.
+- Wildlife can be directly hit by the player's laser.
+- Player-caused wildlife kills become ecosystem world events.
+- Unattended mech wrecks can be stripped by autonomous scavengers.
+- Recent ecosystem activity remains visible on the strategic map.
+
+CORE SYSTEMS
+- 1024 × 1024 toroidal procedural world.
+- 32 × 32 chunk torus.
+- 16 × 16 tiles per chunk.
+- Live X/Y/Z and chunk/tile coordinates.
+- Compact minimap and expandable full-world map.
+- Autonomous creatures independent of player position.
+- Food/water/shelter/danger chunk ecology.
+- Hunger/thirst/energy/fear/alert.
+- Herd identity and hunter grouping.
+- Personal dens and night routines.
+- Carrying capacity and migration.
+- Predation, reproduction, starvation and scavenging.
+- Global weather/day-night cycle.
+- Player disturbance as a local ecological stimulus.
+- Mech wrecks entering the ecosystem food/scavenge loop.
+- Core mech/body/salvage/fabrication/combat systems.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA + PHYSICAL DEVICE TEST
