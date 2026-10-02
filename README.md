@@ -1,4 +1,4 @@
-# DG Build 0014
+# DG Build 0015
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
@@ -90,6 +90,8 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Unattended mech wrecks are now scavengeable by autonomous scavengers, so salvage can decay over time.
 - Mutable game state now persists across app restarts: player position/body state, resources, progression, boss state, wrecks, ecosystem actors/chunks, weather clock and event history are saved.
 - Persistent world state is restored on relaunch rather than reinitializing a fresh ecosystem.
+- Ecosystem population now uses chunk-level LOD: distant wildlife is represented as aggregate dormant populations, while nearby wildlife is promoted into detailed individual actors.
+- The world can therefore contain many more conceptual creatures than the 96 active actor slots without simulating every distant animal every frame.
 
 ### World cycle and weather
 - The autonomous world has a 240-second ecological cycle.
@@ -109,6 +111,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Group alarm propagation makes local disturbances spread through the ecosystem naturally.
 - Save/load restores the living world instead of regenerating a fresh ecosystem each launch.
 - Autosave runs during play and a final save is requested when the Android Activity pauses.
+- Save schema v2 includes the chunk-level dormant population state.
 - Local ecology remains visible without turning the map into a player-centric quest tracker.
 - Recent autonomous ecosystem events are shown as temporary activity markers on the expanded map.
 
@@ -140,7 +143,8 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 11. Observe wildlife/mechanical life around the world. Move away from a group, spend time elsewhere, then return and confirm actors have moved, reproduced, starved, hunted, or left corpses without requiring the player to be nearby.
 12. Fire the laser near wildlife and observe non-hunter creatures become alert/flee; verify a direct hit can kill an ecosystem actor and creates a SHOT world event.
 13. Leave a mech wreck unattended near scavengers and return later; verify the wreck's salvage condition can decrease even without player interaction.
-14. Pause/background the app, relaunch it, and confirm your position, body condition, inventory, defeated boss state, wreck state and ecosystem counters continue from the prior session.
+14. Walk away from wildlife until it leaves the active bubble, then return later; nearby dormant population should be promoted back into individual creatures.
+15. Pause/background the app, relaunch it, and confirm your position, body condition, inventory, defeated boss state, wreck state and ecosystem state continue from the prior session.
 
 ## Architecture direction
 
