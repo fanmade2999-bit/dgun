@@ -730,6 +730,8 @@ static void recordEcoEvent(int type,int kind,float x,float z) {
 static float playerHitFlash=0.0f;
 static float enemyHitFlash=0.0f;
 static float laserT=0.0f;
+static float hitMarkerTimer=0.0f;
+static bool hitMarkerLethal=false;
 static float enemyLaserT=0.0f;
 static float enemyShotDirX=0.0f, enemyShotDirZ=0.0f;
 static double lastTime=0.0;
@@ -2477,6 +2479,37 @@ static void drawCircle2D(const Mat4& vp,float cx,float cy,float radius,
     glDrawArrays(GL_LINE_STRIP,0,SEG+1);
 }
 
+static void drawCombatReticle(const Mat4& vp,float cx,float cy) {
+    const bool firing=laserT>0.0f && firePointer>=0;
+    const float pulse=std::clamp(laserT/0.08f,0.0f,1.0f);
+    const float radius=17.0f+heat*7.0f+(firing?5.0f*pulse:0.0f);
+    const float gap=5.0f+heat*2.0f;
+    const float arm=7.0f+heat*2.0f;
+    const float verts[]={
+        cx-radius-gap-arm,cy,0, cx-radius-gap,cy,0,
+        cx+radius+gap,cy,0, cx+radius+gap+arm,cy,0,
+        cx,cy-radius-gap-arm,0, cx,cy-radius-gap,0,
+        cx,cy+radius+gap,0, cx,cy+radius+gap+arm,0
+    };
+    const float marker=std::clamp(hitMarkerTimer/0.34f,0.0f,1.0f);
+    const float r=marker>0.0f?(hitMarkerLethal?1.0f:1.0f):(firing?0.35f:0.62f);
+    const float g=marker>0.0f?(hitMarkerLethal?0.25f:0.82f):(firing?0.92f:0.84f);
+    const float b=marker>0.0f?0.12f:1.0f;
+    const float a=marker>0.0f?0.95f:0.72f;
+    drawLines(vp,verts,8,r,g,b,a);
+    drawCircle2D(vp,cx,cy,2.5f,r,g,b,a);
+    if(marker>0.0f) {
+        const float cross=6.0f+marker*3.0f;
+        const float hitVerts[]={
+            cx-cross,cy-cross,0,cx-2.0f,cy-2.0f,0,
+            cx+cross,cy-cross,0,cx+2.0f,cy-2.0f,0,
+            cx-cross,cy+cross,0,cx-2.0f,cy+2.0f,0,
+            cx+cross,cy+cross,0,cx+2.0f,cy+2.0f,0
+        };
+        drawLines(vp,hitVerts,8,r,g,b,a);
+    }
+}
+
 static uint8_t glyphBits(char ch,int row) {
     static constexpr uint8_t H[7] = {17,17,17,31,17,17,17};
     static constexpr uint8_t P[7] = {30,17,17,30,16,16,16};
@@ -3193,7 +3226,13 @@ static void drawHud() {
         // Targeting reticle.
         const float cx=viewportW*0.50f;
         const float cy=viewportH*0.47f;
-        drawCircle2D(hud,cx,cy,20.0f,0.6f,0.8f,0.9f,0.70f);
+        drawCombatReticle(hud,cx,cy);
+        if(hitMarkerTimer>0.0f) {
+            drawText2D(hud,"HIT",cx-18.0f,cy+31.0f,2.0f,
+                       hitMarkerLethal?1.0f:0.65f,
+                       hitMarkerLethal?0.28f:0.92f,
+                       0.20f,0.92f);
+        }
     
         // Left-side movement control.
         const float joyBaseX=viewportW*0.18f;
@@ -4587,12 +4626,19 @@ static void updateTransientSystems(float dt) {
     playerHitFlash=std::max(0.0f,playerHitFlash-dt);
     enemyHitFlash=std::max(0.0f,enemyHitFlash-dt);
     bossHitFlash=std::max(0.0f,bossHitFlash-dt);
+    hitMarkerTimer=std::max(0.0f,hitMarkerTimer-dt);
+    if(hitMarkerTimer<=0.0f) hitMarkerLethal=false;
 
     adminToastTimer=std::max(0.0f,adminToastTimer-dt);
     adminBeaconTimer=std::max(0.0f,adminBeaconTimer-dt);
     adminInfoFlashTimer=std::max(0.0f,adminInfoFlashTimer-dt);
     if(adminBeaconTimer<=0.0f) adminBeaconFeature=-1;
     if(adminInfoFlashTimer<=0.0f) adminInfoFlashFeature=-1;
+}
+
+static void registerCombatHit(bool lethal) {
+    hitMarkerTimer=lethal?0.34f:0.14f;
+    hitMarkerLethal=lethal;
 }
 
 static void resolvePlayerWeaponHits(float dt) {
@@ -4624,11 +4670,13 @@ static void resolvePlayerWeaponHits(float dt) {
                 const float d2=dot(sub(enemyCenter,closest),sub(enemyCenter,closest));
                 if(d2<1.65f) {
                     enemyHp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
+                    registerCombatHit(false);
                     enemyHitFlash=0.08f;
                     if(enemyHp<=0.0f) {
                         enemyHp=0.0f;
                         enemyRespawn=2.0f;
                         enemyHitFlash=0.35f;
+                        registerCombatHit(true);
                     }
                 }
             }
@@ -4645,11 +4693,13 @@ static void resolvePlayerWeaponHits(float dt) {
                     const float bossD2=dot(sub(bossCenter,closestBoss),sub(bossCenter,closestBoss));
                     if(bossD2<3.10f) {
                         bossHp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
+                        registerCombatHit(false);
                         bossHitFlash=0.08f;
                         if(bossHp<=0.0f) {
                             bossHp=0.0f;
                             bossDefeated=true;
                             bossHitFlash=0.45f;
+                            registerCombatHit(true);
     
                             // Landmark bosses are a source of named discovery,
                             // not a respawning farm: defeating this one unlocks
@@ -4693,9 +4743,11 @@ static void resolvePlayerWeaponHits(float dt) {
                 EcoActor& animal=ecoActors[hitEco];
                 const float damage=(animal.kind==ECO_HUNTER)?20.0f:12.0f;
                 animal.hp-=damage*trace.energy*dt*60.0f;
+                registerCombatHit(false);
                 animal.fear=std::min(1.0f,animal.fear+dt*3.0f);
                 animal.alert=std::min(1.0f,animal.alert+dt*2.0f);
                 if(animal.hp<=0.0f) {
+                    registerCombatHit(true);
                     recordEcoEvent(6,animal.kind,animal.x,animal.z);
                     ecoKillActor(hitEco);
                     ecosystemLastEvent=6;
@@ -4734,7 +4786,9 @@ static void resolvePlayerWeaponHits(float dt) {
             if(hitSummon>=0) {
                 SummonedEntity& e=summonedEntities[hitSummon];
                 e.hp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
+                registerCombatHit(false);
                 if(e.hp<=0.0f) {
+                    registerCombatHit(true);
                     const int defeatedId=e.id;
                     const std::string name=summonKindName(e.kind);
                     e.active=false;
