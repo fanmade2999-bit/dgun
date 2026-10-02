@@ -1,4 +1,4 @@
-# DG Build 0016
+# DG Build 0017
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
@@ -114,7 +114,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Group alarm propagation makes local disturbances spread through the ecosystem naturally.
 - Save/load restores the living world instead of regenerating a fresh ecosystem each launch.
 - Autosave runs during play and a final save is requested when the Android Activity pauses.
-- Save schema v3 persists the chunk-level dormant population state plus fractional dormant population progress.
+- Save schema v4 persists chunk-level dormant population state, fractional dormant population progress, and the global aggregate migration step.
 - Local ecology remains visible without turning the map into a player-centric quest tracker.
 - Recent autonomous ecosystem events are shown as temporary activity markers on the expanded map.
 
@@ -154,7 +154,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 The prototype now has the core shape of:
 **remote consciousness -> physical body -> localized damage -> abandoned wreck -> salvage -> scarce components -> fabrication -> replacement body -> continued exploration**
 
-Persistent saves for ecosystem state, more species, richer aggregate migrations, births across multiple generations, ecosystem interaction with world facilities/ruins, richer procedural terrain/biomes, more boss variants, and deeper salvage/component inventories remain later systems.
+Persistent saves for ecosystem state, more species, richer aggregate food-chain interactions, births across multiple generations, ecosystem interaction with world facilities/ruins, richer procedural terrain/biomes, more boss variants, and deeper salvage/component inventories remain later systems.
 
 ## Build / test
 
