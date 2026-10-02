@@ -80,6 +80,9 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Crowded populations migrate toward better chunks instead of remaining packed forever.
 - Reproduction is constrained by local ecological carrying capacity.
 - Recent births, hunts, deaths and scavenging are retained as world-event records.
+- The expanded world map shows recent ecosystem activity traces, allowing the player to discover that events happened elsewhere without causing those events to wait for the player.
+- Local HUD ecology reports the current chunk's population, food and water rather than a player-centered quest state.
+- Creatures maintain groups, personal dens, loyalty, alertness and condition across their session.
 
 ### World cycle and weather
 - The autonomous world has a 240-second ecological cycle.
@@ -95,6 +98,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - A compact minimap shows nearby chunks and persistent landmark markers.
 - Tapping **MAP** expands it into the full 32 × 32 chunk world map.
 - The expanded map highlights the current chunk and shows base/facility/boss positions.
+- Recent autonomous ecosystem events appear as fading strategic-map traces.
 - Recent autonomous ecosystem events are shown as temporary activity markers on the expanded map.
 
 ### Landmark boss + equipment progression
@@ -130,7 +134,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 The prototype now has the core shape of:
 **remote consciousness -> physical body -> localized damage -> abandoned wreck -> salvage -> scarce components -> fabrication -> replacement body -> continued exploration**
 
-Persistent saves for ecosystem state, a larger procedural terrain/biome vocabulary, named facilities beyond the test site, more species/food chains, more boss variants, a persistent world map, equipment rarity/identity beyond the prototype LANCE path, and deeper salvage/component inventories remain later systems.
+Persistent saves for ecosystem state, more species/food chains, longer-term migrations, births across multiple generations, ecosystem interaction with world facilities/ruins, richer procedural terrain/biomes, more boss variants, and deeper salvage/component inventories remain later systems.
 
 ## Build / test
 
