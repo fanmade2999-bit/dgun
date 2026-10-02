@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <cstdio>
+#include <string>
 
 namespace dg {
 
@@ -485,6 +486,10 @@ static float laserT=0.0f;
 static float enemyLaserT=0.0f;
 static float enemyShotDirX=0.0f, enemyShotDirZ=0.0f;
 static double lastTime=0.0;
+static std::string savePath;
+static float autosaveTimer=0.0f;
+static constexpr uint32_t SAVE_MAGIC=0x44475356u;
+static constexpr uint32_t SAVE_VERSION=1u;
 
 static double nowSeconds() {
     static double t=0.0;
@@ -500,6 +505,8 @@ static bool beginFabrication();
 static int findOtherBodySlot();
 static void saveActiveBodyToPool();
 static void loadBodyFromSlot(int slot);
+static bool saveGame();
+static bool loadGame();
 
 
 static GLuint compileShader(GLenum type, const char* src) {
@@ -2826,6 +2833,7 @@ static void updateBoss(float dt) {
 }
 
 static void update(float dt) {
+    autosaveTimer+=dt;
     if(fabricationTimer>0.0f) {
         fabricationTimer=std::max(0.0f,fabricationTimer-dt);
         if(fabricationTimer<=0.0f) completeFabrication();
@@ -2899,6 +2907,10 @@ static void update(float dt) {
     updateEcosystem(dt);
     updateEnemy(dt);
     updateBoss(dt);
+
+    if(!savePath.empty() && autosaveTimer>=5.0f) {
+        saveGame();
+    }
 
     enemyLaserT=std::max(0.0f,enemyLaserT-dt);
     bossLaserT=std::max(0.0f,bossLaserT-dt);
@@ -3167,9 +3179,23 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
 } // namespace dg
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_fanmade_dg_MainActivity_00024NativeBridge_init(JNIEnv*,jclass) {
+Java_com_fanmade_dg_MainActivity_00024NativeBridge_init(
+        JNIEnv* env,jclass,jstring path) {
+    if(path) {
+        const char* chars=env->GetStringUTFChars(path,nullptr);
+        if(chars) {
+            dg::savePath=chars;
+            env->ReleaseStringUTFChars(path,chars);
+        }
+    }
     dg::initGL();
-    __android_log_print(ANDROID_LOG_INFO,"DG-0005","Native renderer initialized");
+    __android_log_print(ANDROID_LOG_INFO,"DG-0014",
+                        "Native renderer initialized; persistent save configured");
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_fanmade_dg_MainActivity_00024NativeBridge_save(JNIEnv*,jclass) {
+    dg::saveGame();
 }
 
 extern "C" JNIEXPORT void JNICALL
