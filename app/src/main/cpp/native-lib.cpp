@@ -144,18 +144,34 @@ static constexpr int WORLD_CHUNK_STATE_COUNT=WORLD_CHUNK_COUNT*WORLD_CHUNK_COUNT
 static constexpr float ECO_CYCLE_SECONDS=240.0f;
 
 struct FeatureFlags {
+    // PLAYER
+    bool player=true;
+    bool playerMovement=true;
+    bool playerAim=false;
+    bool playerJump=true;
+    bool camera=true;
+    bool respawn=true;
+
+    // WORLD
     bool terrain=true;
     bool terrainDebug=false;
-    bool player=true;
-    bool playerCombat=false;
     bool worldStructures=false;
     bool weather=false;
     bool ecosystem=false;
     bool enemy=false;
     bool boss=false;
     bool wrecks=false;
+
+    // GAMEPLAY
+    bool playerCombat=false;
+    bool bodySystem=false;
+    bool salvage=false;
+    bool equipment=false;
+
+    // UI / SYSTEM
     bool navigationHud=false;
     bool progressionHud=false;
+    bool persistence=true;
 };
 
 static FeatureFlags features{};
@@ -191,21 +207,30 @@ struct FeatureDefinition {
 };
 
 static constexpr FeatureDefinition FEATURE_DEFS[] = {
-    {"PLAYER",  ADMIN_GROUP_PLAYER,  ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_PLAYER,     &FeatureFlags::player},
+    {"PLAYER",  ADMIN_GROUP_PLAYER,  ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_PLAYER, &FeatureFlags::player},
+    {"MOVE",    ADMIN_GROUP_PLAYER,  ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,   &FeatureFlags::playerMovement},
+    {"AIM",     ADMIN_GROUP_PLAYER,  ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,   &FeatureFlags::playerAim},
+    {"JUMP",    ADMIN_GROUP_PLAYER,  ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,   &FeatureFlags::playerJump},
+    {"CAMERA",  ADMIN_GROUP_PLAYER,  ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,   &FeatureFlags::camera},
+    {"RESPAWN", ADMIN_GROUP_PLAYER,  ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,   &FeatureFlags::respawn},
 
-    {"TERRAIN", ADMIN_GROUP_WORLD,   ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::terrain},
-    {"STRUCT",  ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_STRUCTURES, &FeatureFlags::worldStructures},
-    {"WEATHER", ADMIN_GROUP_WORLD,   ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::weather},
-    {"ECO",     ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_ECO,        &FeatureFlags::ecosystem},
-    {"ENEMY",   ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_ENEMY,      &FeatureFlags::enemy},
-    {"BOSS",    ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_BOSS,       &FeatureFlags::boss},
-    {"WRECK",   ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_WRECK,      &FeatureFlags::wrecks},
+    {"TERRAIN", ADMIN_GROUP_WORLD, ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::terrain},
+    {"STRUCT",  ADMIN_GROUP_WORLD, ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_STRUCTURES, &FeatureFlags::worldStructures},
+    {"WEATHER", ADMIN_GROUP_WORLD, ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::weather},
+    {"ECO",     ADMIN_GROUP_WORLD, ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_ECO,        &FeatureFlags::ecosystem},
+    {"ENEMY",   ADMIN_GROUP_WORLD, ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_ENEMY,      &FeatureFlags::enemy},
+    {"BOSS",    ADMIN_GROUP_WORLD, ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_BOSS,       &FeatureFlags::boss},
+    {"WRECK",   ADMIN_GROUP_WORLD, ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_WRECK,      &FeatureFlags::wrecks},
 
-    {"COMBAT",  ADMIN_GROUP_GAMEPLAY,ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::playerCombat},
+    {"COMBAT",  ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::playerCombat},
+    {"BODY",    ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::bodySystem},
+    {"SALVAGE", ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::salvage},
+    {"GEAR",    ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::equipment},
 
-    {"NAV",     ADMIN_GROUP_UI,      ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::navigationHud},
-    {"PROGRESS",ADMIN_GROUP_UI,      ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::progressionHud},
-    {"DEBUG",   ADMIN_GROUP_UI,      ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::terrainDebug}
+    {"NAV",      ADMIN_GROUP_UI, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::navigationHud},
+    {"PROGRESS", ADMIN_GROUP_UI, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::progressionHud},
+    {"SAVE",     ADMIN_GROUP_UI, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::persistence},
+    {"DEBUG",    ADMIN_GROUP_UI, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::terrainDebug}
 };
 
 static constexpr int FEATURE_COUNT =
@@ -213,23 +238,34 @@ static constexpr int FEATURE_COUNT =
 
 static void toggleAdminFeature(int index);
 static void configurePrototypeFeatures() {
-    // Single switchboard for development slices. The current slice deliberately
-    // contains only the player, procedural terrain, camera-range gesture and
-    // jump. Combat, enemies, ecosystem, structures and map/navigation UI stay
-    // compiled in but inert until their systems are brought back as a unit.
     features=FeatureFlags{};
-    features.terrain=true;
+
     features.player=true;
-    features.playerCombat=false;
+    features.playerMovement=true;
+    features.playerAim=false;
+    features.playerJump=true;
+    features.camera=true;
+    features.respawn=true;
+
+    features.terrain=true;
+    features.terrainDebug=false;
     features.worldStructures=false;
     features.weather=false;
     features.ecosystem=false;
     features.enemy=false;
     features.boss=false;
     features.wrecks=false;
+
+    features.playerCombat=false;
+    features.bodySystem=false;
+    features.salvage=false;
+    features.equipment=false;
+
     features.navigationHud=false;
     features.progressionHud=false;
+    features.persistence=true;
 }
+
 static constexpr float ECO_DAY_START=0.20f;
 static constexpr float ECO_NIGHT_START=0.78f;
 
@@ -2123,6 +2159,7 @@ static bool pointInActionButton(float x,float y,float w,float h) {
 }
 
 static bool performBodySwap() {
+    if(!features.bodySystem || !features.worldStructures) return false;
     if(!nearPoint(px,pz,BASE_X,BASE_Z,2.8f)) return false;
 
     const int other=findOtherBodySlot();
@@ -2134,7 +2171,8 @@ static bool performBodySwap() {
 }
 
 static bool performContextAction() {
-    if(nearPoint(px,pz,wreck.x,wreck.z,2.0f) && wreck.active) {
+    if(features.salvage && features.wrecks &&
+       nearPoint(px,pz,wreck.x,wreck.z,2.0f) && wreck.active) {
         // Salvage is intentionally condition-dependent: destroyed parts yield
         // little, intact parts yield much more. Recovery is a conversion into
         // components; later this becomes a proper salvage inventory UI.
@@ -2162,7 +2200,8 @@ static bool performContextAction() {
         return true;
     }
 
-    if(nearPoint(px,pz,FACILITY_X,FACILITY_Z,2.6f) && unknownEquipment>0) {
+    if(features.equipment && features.worldStructures &&
+       nearPoint(px,pz,FACILITY_X,FACILITY_Z,2.6f) && unknownEquipment>0) {
         // Identification is deliberately location-driven instead of pure RNG:
         // the facility reveals one hidden piece of equipment.
         --unknownEquipment;
@@ -2172,7 +2211,8 @@ static bool performContextAction() {
         return true;
     }
 
-    if(nearPoint(px,pz,BASE_X,BASE_Z,2.8f)) {
+    if(features.bodySystem && features.worldStructures &&
+       nearPoint(px,pz,BASE_X,BASE_Z,2.8f)) {
         return beginFabrication();
     }
 
@@ -3021,6 +3061,7 @@ static void drawHud() {
 
     const bool minimal =
         !features.playerCombat &&
+        !features.playerAim &&
         !features.worldStructures &&
         !features.weather &&
         !features.ecosystem &&
@@ -3516,8 +3557,30 @@ static void toggleAdminFeature(int index) {
             mapExpanded=false;
         } else if(def.member==&FeatureFlags::playerCombat) {
             firePointer=-1;
-            aimPointer=-1;
             laserT=0.0f;
+        } else if(def.member==&FeatureFlags::playerAim) {
+            aimPointer=-1;
+        } else if(def.member==&FeatureFlags::playerMovement) {
+            movePointer=-1;
+            joyX=0.0f;
+            joyY=0.0f;
+        } else if(def.member==&FeatureFlags::playerJump) {
+            jumpPointer=-1;
+            jumpRequested=false;
+            py=0.0f;
+            playerVerticalVelocity=0.0f;
+            playerGrounded=true;
+        } else if(def.member==&FeatureFlags::camera) {
+            cameraPointer=-1;
+            lastCameraY=0.0f;
+        } else if(def.member==&FeatureFlags::respawn) {
+            respawnTimer=0.0f;
+        } else if(def.member==&FeatureFlags::bodySystem) {
+            fabricationTimer=0.0f;
+            fabricationSlot=-1;
+            swapPointer=-1;
+            actionPointer=-1;
+            actionPointerActive=false;
         } else if(def.member==&FeatureFlags::navigationHud) {
             mapPointer=-1;
             mapExpanded=false;
@@ -3558,11 +3621,18 @@ static void storeDestroyedWreck() {
 }
 
 static void beginPlayerDeath() {
-    worldNoise=std::min(1.0f,worldNoise+0.8f);
-    storeDestroyedWreck();
+    if(!features.respawn) {
+        resetPlayerBody();
+        return;
+    }
 
-    // The chassis has physically ceased to be an available body.
-    bodySlots[activeBodySlot].occupied=false;
+    worldNoise=std::min(1.0f,worldNoise+0.8f);
+    if(features.wrecks) storeDestroyedWreck();
+
+    if(features.bodySystem) {
+        // The chassis has physically ceased to be an available body.
+        bodySlots[activeBodySlot].occupied=false;
+    }
 
     miniBotMode=false;
     py=0.0f;
@@ -4297,6 +4367,7 @@ static void updatePlayerPhysics(float dt) {
 }
 
 static void finishPlayerRespawn() {
+    if(!features.respawn) return;
     px=wrapWorld(BASE_X);
     pz=wrapWorld(BASE_Z);
     py=0.0f;
@@ -4306,16 +4377,21 @@ static void finishPlayerRespawn() {
     aimPitch=0.18f;
     cameraDistance=6.8f;
 
-    const int nextBody=findOtherBodySlot();
-    if(nextBody>=0) {
+    if(!features.bodySystem) {
         miniBotMode=false;
-        loadBodyFromSlot(nextBody);
-        bodySlots[nextBody].occupied=true;
-    } else {
-        miniBotMode=true;
         resetPlayerBody();
-        playerHp=55.0f;
-        chassisIntegrity=55.0f;
+    } else {
+        const int nextBody=findOtherBodySlot();
+        if(nextBody>=0) {
+            miniBotMode=false;
+            loadBodyFromSlot(nextBody);
+            bodySlots[nextBody].occupied=true;
+        } else {
+            miniBotMode=true;
+            resetPlayerBody();
+            playerHp=55.0f;
+            chassisIntegrity=55.0f;
+        }
     }
 
     actionPointer=-1;
@@ -4345,7 +4421,7 @@ static void resetPlayerInput() {
 static void updatePlayerSystem(float dt) {
     if(!features.player) return;
 
-    if(respawnTimer>0.0f) {
+    if(respawnTimer>0.0f && features.respawn) {
         respawnTimer=std::max(0.0f,respawnTimer-dt);
         heat=std::max(0.0f,heat-dt*0.7f);
         laserT=0.0f;
@@ -4360,8 +4436,8 @@ static void updatePlayerSystem(float dt) {
     }
 
     const float dead=0.15f;
-    float mx=(std::fabs(joyX)>dead)?joyX:0.0f;
-    float my=(std::fabs(joyY)>dead)?joyY:0.0f;
+    float mx=(features.playerMovement && std::fabs(joyX)>dead)?joyX:0.0f;
+    float my=(features.playerMovement && std::fabs(joyY)>dead)?joyY:0.0f;
 
     const float moveLen=std::sqrt(mx*mx+my*my);
     if(moveLen>1.0f) {
@@ -4374,8 +4450,17 @@ static void updatePlayerSystem(float dt) {
     const Vec3 move=add(mul(forward,-my),mul(right,mx));
 
     const float speed=miniBotMode ? 2.2f : 3.6f;
-    movePlayer(move.x*speed*dt,move.z*speed*dt);
-    updatePlayerPhysics(dt);
+    if(features.playerMovement) {
+        movePlayer(move.x*speed*dt,move.z*speed*dt);
+    }
+    if(features.playerJump) {
+        updatePlayerPhysics(dt);
+    } else {
+        py=0.0f;
+        playerVerticalVelocity=0.0f;
+        playerGrounded=true;
+        jumpRequested=false;
+    }
 
     if(features.playerCombat && !miniBotMode && firePointer>=0 && heat<0.92f) {
         worldNoise=std::min(1.0f,worldNoise+dt*3.5f);
@@ -4388,6 +4473,7 @@ static void updatePlayerSystem(float dt) {
 }
 
 static void updateProgressionTimers(float dt) {
+    if(!features.bodySystem) return;
     if(fabricationTimer>0.0f) {
         fabricationTimer=std::max(0.0f,fabricationTimer-dt);
         if(fabricationTimer<=0.0f) completeFabrication();
@@ -4590,11 +4676,12 @@ static void frame() {
     const Mat4 proj=perspective(62.0f*PI/180.0f,aspect,0.1f,60.0f);
 
     const Vec3 target={px,py+0.90f,pz};
-    const float cameraHeight=3.78f+cameraDistance*0.12f;
+    const float activeCameraDistance=features.camera?cameraDistance:6.8f;
+    const float cameraHeight=3.78f+activeCameraDistance*0.12f;
     const Vec3 eye={
-        px-cameraDistance*std::sin(yaw),
+        px-activeCameraDistance*std::sin(yaw),
         py+cameraHeight,
-        pz+cameraDistance*std::cos(yaw)
+        pz+activeCameraDistance*std::cos(yaw)
     };
     const Mat4 vp=mulM(proj,lookAt(eye,target,{0,1,0}));
 
@@ -4673,7 +4760,7 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
                    pointInFireButton(x,y,w,h) && firePointer<0) {
             firePointer=pointerId;
             laserT=0.08f;
-        } else if(features.playerCombat && !leftZone && aimPointer<0) {
+        } else if(features.playerAim && !leftZone && aimPointer<0) {
             aimPointer=pointerId;
             lastAimX=x;
             lastAimY=y;
@@ -4695,7 +4782,7 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             cameraDistance=std::clamp(cameraDistance+dy*0.018f,
                                        CAMERA_DISTANCE_MIN,CAMERA_DISTANCE_MAX);
             lastCameraY=y;
-        } else if(pointerId==aimPointer && features.playerCombat) {
+        } else if(pointerId==aimPointer && features.playerAim) {
             updateAim(x,y);
         }
         return;
