@@ -4701,6 +4701,45 @@ static void resolvePlayerWeaponHits(float dt) {
                     animal.target=-1;
                 }
             }
+
+            int hitSummon=-1;
+            float nearestSummon=LASER_MAX_RANGE+1.0f;
+            for(int i=0;i<MAX_SUMMONED_ENTITIES;i++) {
+                const SummonedEntity& e=summonedEntities[i];
+                if(!e.active) continue;
+                const bool summonBoss=summonKindIsBoss(e.kind);
+                if((summonBoss&&!features.summonedBosses) ||
+                   (!summonBoss&&!features.summonedNpcs)) continue;
+
+                const Vec3 center={
+                    nearestWorldImage(e.x,px),
+                    summonBoss?1.25f:1.05f,
+                    nearestWorldImage(e.z,pz)
+                };
+                const Vec3 to=sub(center,start);
+                const float along=dot(to,dir);
+                if(along<=0.0f||along>maxBeamDistance+0.05f||along>=nearestSummon)continue;
+
+                const Vec3 closest=add(start,mul(dir,along));
+                const float radius=summonBoss?1.65f:0.62f;
+                const Vec3 delta=sub(center,closest);
+                if(dot(delta,delta)<radius*radius) {
+                    nearestSummon=along;
+                    hitSummon=i;
+                }
+            }
+
+            if(hitSummon>=0) {
+                SummonedEntity& e=summonedEntities[hitSummon];
+                e.hp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
+                if(e.hp<=0.0f) {
+                    const int defeatedId=e.id;
+                    const std::string name=summonKindName(e.kind);
+                    e.active=false;
+                    std::lock_guard<std::mutex> lock(commandMutex);
+                    commandLastResult="DEFEATED "+name+" #"+std::to_string(defeatedId);
+                }
+            }
         }
 }
 
@@ -4735,10 +4774,12 @@ static std::vector<std::string> commandSuggestions(const std::string& text){
     if(!p.empty()&&(p[0]=="summon"||p[0]=="/summon")){
         if(p.size()<=1)return {"/summon npc","/summon boss"};
         const std::string& type=p[1];
-        if((type=="npc"||type=="boss")&&p.size()==2&&trailing){
-            const auto& names=(type=="boss")?bosses:npcs;
-            for(const auto& n:names)out.push_back("/summon "+type+" "+n);
-            return out;
+        if((type=="npc"||type=="boss")&&p.size()==2){
+            if(trailing || p[1]==type){
+                const auto& names=(type=="boss")?bosses:npcs;
+                for(const auto& n:names)out.push_back("/summon "+type+" "+n);
+                return out;
+            }
         }
         if(p.size()>=3){
             const auto& names=(type=="boss")?bosses:npcs;
@@ -4813,6 +4854,12 @@ static std::string executeAdminCommand(const std::string& raw){
         if(typed&&((p[1]=="npc")==summonKindIsBoss(kind)))return "TYPE MISMATCH";
         const int coord=typed?3:2;
         float x=px,z=pz;
+        if((int)p.size()==coord){
+            const float angle=float(nextSummonedId)*0.91f;
+            const float radius=summonKindIsBoss(kind)?4.0f:2.4f;
+            x=px+std::cos(angle)*radius;
+            z=pz+std::sin(angle)*radius;
+        }
         if((int)p.size()>coord&&!parseCommandFloat(p[coord],px,x))return "BAD X";
         if((int)p.size()>coord+1&&!parseCommandFloat(p[coord+1],pz,z))return "BAD Z";
         std::string result;
