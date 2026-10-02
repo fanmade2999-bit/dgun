@@ -483,6 +483,9 @@ static int ecosystemKills=0;
 static int ecosystemLastEvent=0;
 static float ecosystemLastEventTimer=0.0f; // 1=birth, 2=predation, 3=starvation, 4=scavenge
 static int ecosystemCycle=0;
+// Aggregate migration is stepped on the global ecology clock rather than on
+// player proximity, so distant populations reorganize even when never seen.
+static int ecosystemMigrationStep=0;
 static float worldNoise=0.0f;
 
 static void recordEcoEvent(int type,int kind,float x,float z) {
@@ -946,6 +949,7 @@ static void initializeEcosystem() {
     ecosystemLastEvent=0;
     ecosystemLastEventTimer=0.0f;
     ecosystemCycle=0;
+    ecosystemMigrationStep=0;
     ecoEventWrite=0;
     for(int i=0;i<ECO_EVENT_HISTORY;i++) ecoEventHistory[i]=EcoEventRecord{};
 
@@ -1018,6 +1022,105 @@ static int ecoDormantCapacity(int kind,const EcoChunkState& chunk) {
     const float quality=0.25f+chunk.food*0.60f+chunk.water*0.35f+
                         chunk.shelter*0.12f-chunk.danger*0.40f;
     return std::clamp(int(std::round(base*quality)),1,24);
+}
+
+
+static float ecoDormantMigrationScore(int cx,int cz,int kind) {
+    const EcoChunkState& chunk=ecoChunks[chunkStateIndex(cx,cz)];
+    const float prey=float(chunk.dormant[ECO_GRAZER]+chunk.dormant[ECO_SCAVENGER]);
+
+    if(kind==ECO_GRAZER) {
+        return chunk.food*1.25f+chunk.water*0.60f+
+               chunk.shelter*0.12f-chunk.danger*0.55f;
+    }
+    if(kind==ECO_SCAVENGER) {
+        return chunk.food*0.80f+chunk.water*0.42f+
+               chunk.shelter*0.18f-chunk.danger*0.42f;
+    }
+
+    // Hunters migrate toward prey-rich chunks, while avoiding severe danger.
+    return prey*0.075f+chunk.water*0.18f+
+           chunk.shelter*0.18f-chunk.danger*0.48f;
+}
+
+static void ecoMigrateDormantPopulation() {
+    const int step=int(std::floor(std::max(0.0f,ecosystemClock)/12.0f));
+    if(step<=ecosystemMigrationStep) return;
+    ecosystemMigrationStep=step;
+
+    // Calculate all moves from the pre-migration state, then apply them. This
+    // prevents a population from chaining through several chunks in one pass.
+    int migration[WORLD_CHUNK_STATE_COUNT][3]{};
+
+    for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) {
+        const int sx=(i%WORLD_CHUNK_COUNT)-WORLD_CHUNK_COUNT/2;
+        const int sz=(i/WORLD_CHUNK_COUNT)-WORLD_CHUNK_COUNT/2;
+        const EcoChunkState& source=ecoChunks[i];
+
+        for(int kind=0;kind<3;kind++) {
+            if(source.dormant[kind]<2) continue;
+
+            // Only a subset of chunks moves on each migration step. This keeps
+            // the aggregate world dynamic without causing the whole ecosystem
+            // to reshuffle every few seconds.
+            const uint32_t gate=chunkHash(sx,sz) ^
+                uint32_t(kind*0x9E3779B9u) ^
+                uint32_t(step*0x85EBCA6Bu);
+            if((gate&7u)!=0u) continue;
+
+            const float sourceScore=ecoDormantMigrationScore(sx,sz,kind);
+            float bestScore=sourceScore;
+            int bestCx=sx;
+            int bestCz=sz;
+
+            static constexpr int DX[8]={-1,0,1,-1,1,-1,0,1};
+            static constexpr int DZ[8]={-1,-1,-1,0,0,1,1,1};
+
+            for(int n=0;n<8;n++) {
+                const int cx=sx+DX[n];
+                const int cz=sz+DZ[n];
+                const float destinationScore=
+                    ecoDormantMigrationScore(cx,cz,kind)-
+                    0.055f*float(std::abs(DX[n])+std::abs(DZ[n]));
+
+                if(destinationScore>bestScore+0.085f) {
+                    bestScore=destinationScore;
+                    bestCx=cx;
+                    bestCz=cz;
+                }
+            }
+
+            if(bestCx==sx && bestCz==sz) continue;
+
+            const EcoChunkState& destination=
+                ecoChunks[chunkStateIndex(bestCx,bestCz)];
+            const int cap=ecoDormantCapacity(kind,destination);
+            const int pending=std::max(0,migration[chunkStateIndex(bestCx,bestCz)][kind]);
+            if(int(destination.dormant[kind])+pending>=cap) continue;
+
+            migration[i][kind]--;
+            migration[chunkStateIndex(bestCx,bestCz)][kind]++;
+        }
+    }
+
+    bool movedAny=false;
+    for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) {
+        for(int kind=0;kind<3;kind++) {
+            const int delta=migration[i][kind];
+            if(delta==0) continue;
+
+            const int next=std::clamp(
+                int(ecoChunks[i].dormant[kind])+delta,0,
+                int(ecoDormantCapacity(kind,ecoChunks[i])));
+            ecoChunks[i].dormant[kind]=uint16_t(next);
+            movedAny=true;
+        }
+    }
+
+    if(movedAny) {
+        ecosystemLastEvent=7;
+        ecosystemLastEventTimer=2.5f;
+    }
 }
 
 static void ecoSimulateDormantPopulation(float dt) {
@@ -1370,6 +1473,7 @@ static void simulateEcosystemTick(float dt) {
     }
 
     ecoSimulateDormantPopulation(dt);
+    ecoMigrateDormantPopulation();
     ecoDemoteDistantActors();
     ecoPromoteNearbyPopulation();
 
@@ -2435,6 +2539,8 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
             drawCircle2D(hud,mx,my,4.0f,0.30f,0.78f,0.42f,alpha);
         } else if(e.type==4) {
             drawCircle2D(hud,mx,my,3.5f,0.72f,0.62f,0.28f,alpha);
+        } else if(e.type==7) {
+            drawCircle2D(hud,mx,my,4.5f,0.40f,0.68f,0.92f,alpha);
         }
     }
 
@@ -2670,7 +2776,8 @@ static void drawHud() {
                               (ecosystemLastEvent==3)?"DEATH":
                               (ecosystemLastEvent==4)?"FOOD":
                               (ecosystemLastEvent==5)?"CYCLE":
-                              (ecosystemLastEvent==6)?"SHOT":"";
+                              (ecosystemLastEvent==6)?"SHOT":
+                              (ecosystemLastEvent==7)?"MOVE":"";
         if(eventText[0]) {
             drawText2D(hud,eventText,viewportW*0.63f,viewportH*0.90f,2.05f,
                        0.60f,0.80f,0.68f,0.72f);
@@ -2970,6 +3077,7 @@ struct SaveSnapshot {
     int ecosystemLastEvent=0;
     float ecosystemLastEventTimer=0.0f;
     int ecosystemCycle=0;
+    int ecosystemMigrationStep=0;
     float worldNoise=0.0f;
 
     EcoEventRecord ecoEventHistory[ECO_EVENT_HISTORY]{};
@@ -3237,6 +3345,7 @@ static bool saveGame() {
     savePod(payload,ecosystemLastEvent);
     savePod(payload,ecosystemLastEventTimer);
     savePod(payload,ecosystemCycle);
+    savePod(payload,ecosystemMigrationStep);
     savePod(payload,worldNoise);
 
     savePod(payload,ecoEventWrite);
@@ -3378,6 +3487,7 @@ static bool loadGame() {
            !loadPod(payload,cursor,snapshot->ecosystemLastEvent) ||
            !loadPod(payload,cursor,snapshot->ecosystemLastEventTimer) ||
            !loadPod(payload,cursor,snapshot->ecosystemCycle) ||
+           !loadPod(payload,cursor,snapshot->ecosystemMigrationStep) ||
            !loadPod(payload,cursor,snapshot->worldNoise)) return false;
 
         if(!loadPod(payload,cursor,snapshot->ecoEventWrite)) return false;
@@ -3407,7 +3517,8 @@ static bool loadGame() {
        snapshot->ecoEventWrite<0 || snapshot->ecoEventWrite>=ECO_EVENT_HISTORY ||
        snapshot->baseMode>1 ||
        snapshot->ecosystemPopulation<0 ||
-       snapshot->ecosystemCycle<0) {
+       snapshot->ecosystemCycle<0 ||
+       snapshot->ecosystemMigrationStep<0) {
         return false;
     }
 
@@ -3465,6 +3576,7 @@ static bool loadGame() {
     ecosystemLastEvent=snapshot->ecosystemLastEvent;
     ecosystemLastEventTimer=std::max(0.0f,snapshot->ecosystemLastEventTimer);
     ecosystemCycle=snapshot->ecosystemCycle;
+    ecosystemMigrationStep=std::max(0,snapshot->ecosystemMigrationStep);
     worldNoise=std::clamp(snapshot->worldNoise,0.0f,1.0f);
 
     ecoEventWrite=snapshot->ecoEventWrite;
