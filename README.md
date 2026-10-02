@@ -1,4 +1,4 @@
-# DG Build 0010
+# DG Build 0011
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
@@ -68,6 +68,18 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Actors use toroidal shortest-distance movement and can cross world seams normally.
 - Only nearby actors are rendered for performance; their off-screen simulation continues.
 - Minimap cells include population-density shading so the larger world has visible life patterns.
+- Chunk state now includes food, water, shelter and local danger.
+- Food and water regenerate globally, with weather affecting the rate.
+- Creatures have hunger, thirst, energy and fear needs and react to local conditions.
+- Hunters increase local danger; grazers become more cautious and move differently at night.
+- Predation and starvation are tracked as separate ecosystem events.
+
+### World cycle and weather
+- The autonomous world has a 240-second ecological cycle.
+- Day/night state changes creature activity and scene lighting.
+- Rain intensity is generated from world time rather than from the player.
+- Rain replenishes world water and accelerates food recovery.
+- Visible rain is rendered locally around the player, but the underlying weather clock is global.
 
 ### Coordinates + expandable minimap
 - Live **X/Y/Z** coordinates are displayed.
