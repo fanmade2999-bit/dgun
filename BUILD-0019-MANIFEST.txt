@@ -1,0 +1,51 @@
+BUILD: 0019
+APP ID: com.fanmade.dg
+VERSION: 0.1.9
+VERSION CODE: 19
+
+NEW IN THIS BUILD
+- Added a permanent in-game ADMIN button.
+- Added organized PLAYER, WORLD, GAMEPLAY and UI feature groups.
+- Every registered FeatureFlags system now has an ON/OFF control.
+- ADMIN remains usable even when PLAYER is disabled.
+- Turning a physical feature ON creates a temporary stylized world beacon above its physical anchor.
+- Turning an information feature ON briefly makes its admin row glow before returning to normal.
+- Every toggle displays an immediate ON/OFF message.
+- Disabling a system clears relevant transient pointers and overlays.
+
+REGISTERED FEATURES
+- PLAYER
+- TERRAIN
+- STRUCT
+- WEATHER
+- ECO
+- ENEMY
+- BOSS
+- WRECK
+- COMBAT
+- NAV
+- PROGRESS
+- DEBUG
+
+PHYSICAL FEEDBACK
+- PLAYER -> beacon above the player.
+- STRUCT -> beacons over the base and discovery facility.
+- ECO -> beacon over the nearest active creature.
+- ENEMY -> beacon over the enemy position.
+- BOSS -> beacon over the boss landmark.
+- WRECK -> beacon over the active wreck.
+- Information-only features use a temporary admin-panel glow instead.
+
+ARCHITECTURE
+- The main update/render orchestration remains modular.
+- The ADMIN panel changes feature state through the central FeatureFlags switchboard.
+- Admin metadata is separate from feature execution code.
+
+SAVE
+- Existing persistence format remains schema version 5.
+- ADMIN state is runtime-only and is not persisted.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA
