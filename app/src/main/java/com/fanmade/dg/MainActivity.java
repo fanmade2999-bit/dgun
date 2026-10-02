@@ -8,7 +8,8 @@ import android.content.pm.ActivityInfo;
 
 /**
  * Thin Android shell. Simulation and rendering live in native C++.
- * Build 0002 adds proper multi-touch pointer routing.
+ * Build 0016 keeps the Android layer intentionally thin; native C++ owns
+ * persistence, simulation, rendering, and input state.
  */
 public final class MainActivity extends Activity {
     private GameSurface surface;
