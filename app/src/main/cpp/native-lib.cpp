@@ -3088,6 +3088,13 @@ static void drawAdminPanel(const Mat4& hud) {
         headerY+=23.0f+float(adminGroupRows(AdminFeatureGroup(g)))*rowH+8.0f;
     }
 
+    const float cmdX1=x1+12.0f;
+    const float cmdY1=y2-48.0f;
+    const float cmdX2=cmdX1+142.0f;
+    const float cmdY2=y2-14.0f;
+    drawRect2D(hud,cmdX1,cmdY1,cmdX2,cmdY2,0.025f,0.065f,0.080f,0.96f);
+    drawText2D(hud,"CMD",cmdX1+12.0f,cmdY1+7.0f,1.8f,0.74f,0.94f,1.0f,0.96f);
+
     for(int i=0;i<FEATURE_COUNT;i++) {
         float bx1,by1,bx2,by2;
         adminFeatureRect(i,bx1,by1,bx2,by2);
@@ -4915,6 +4922,50 @@ static void update(float dt) {
     }
 }
 
+static void drawSummonedEntities(const Mat4& vp){
+    for(const auto& e:summonedEntities){
+        if(!e.active)continue;
+        const bool boss=summonKindIsBoss(e.kind);
+        if((boss&&!features.summonedBosses)||(!boss&&!features.summonedNpcs))continue;
+        const float x=nearestWorldImage(e.x,px);
+        const float z=nearestWorldImage(e.z,pz);
+
+        if(!boss){
+            float r=0.24f,g=0.52f,b=0.66f;
+            switch(e.kind){
+                case SUMMON_NPC_MECHANIC:r=0.58f;g=0.46f;b=0.20f;break;
+                case SUMMON_NPC_SCIENTIST:r=0.68f;g=0.70f;b=0.78f;break;
+                case SUMMON_NPC_TRADER:r=0.68f;g=0.42f;b=0.18f;break;
+                case SUMMON_NPC_SCOUT:r=0.22f;g=0.68f;b=0.48f;break;
+                case SUMMON_NPC_MEDIC:r=0.78f;g=0.78f;b=0.84f;break;
+                case SUMMON_NPC_RANGER:r=0.28f;g=0.50f;b=0.76f;break;
+                default:break;
+            }
+            drawCube(vp,{x,0.84f,z},{0.26f,0.40f,0.22f},e.yaw,r,g,b);
+            drawCube(vp,{x,1.45f,z},{0.21f,0.26f,0.21f},e.yaw,r,g,b);
+            drawCube(vp,localOffset({x,0,z},{-0.38f,0.82f,0},e.yaw),{0.08f,0.28f,0.08f},e.yaw,r,g,b);
+            drawCube(vp,localOffset({x,0,z},{0.38f,0.82f,0},e.yaw),{0.08f,0.28f,0.08f},e.yaw,r,g,b);
+        }else{
+            float r=0.46f,g=0.10f,b=0.08f;
+            if(e.kind==SUMMON_BOSS_SAMURAI){r=0.40f;g=0.08f;b=0.40f;}
+            else if(e.kind==SUMMON_BOSS_RAPTOR){r=0.24f;g=0.42f;b=0.12f;}
+            else if(e.kind==SUMMON_BOSS_BEHEMOTH){r=0.52f;g=0.20f;b=0.07f;}
+            else if(e.kind==SUMMON_BOSS_SENTINEL){r=0.18f;g=0.36f;b=0.50f;}
+            const float k=1.0f+0.10f*float(e.kind-SUMMON_BOSS_SAMURAI);
+            drawCube(vp,{x,1.15f*k,z},{0.95f*k,1.0f*k,0.86f*k},e.yaw,r,g,b);
+            drawCube(vp,localOffset({x,0,z},{0,2.35f*k,0},e.yaw),{0.50f*k,0.38f*k,0.50f*k},e.yaw,r,g,b);
+            if(e.kind==SUMMON_BOSS_SAMURAI)
+                drawCube(vp,localOffset({x,0,z},{0,1.50f,-1.35f},e.yaw),{0.10f,0.10f,1.50f},e.yaw,0.72f,0.76f,0.84f);
+            else if(e.kind==SUMMON_BOSS_RAPTOR)
+                drawCube(vp,localOffset({x,0,z},{0,0.75f,-1.35f},e.yaw),{0.40f,0.30f,1.05f},e.yaw,r,g,b);
+            else
+                drawCube(vp,localOffset({x,0,z},{0,1.55f,-1.45f},e.yaw),{0.20f,0.22f,1.20f},e.yaw,0.72f,0.20f,0.12f);
+            const float hp=std::clamp(e.hp/std::max(1.0f,e.maxHp),0.0f,1.0f);
+            drawCube(vp,{x,3.10f*k,z},{0.52f*hp,0.035f,0.035f},0.0f,0.94f,0.22f,0.10f,0.88f);
+        }
+    }
+}
+
 static void drawWorldScene(const Mat4& vp) {
     if(features.terrain) {
         drawProceduralTerrain(vp);
@@ -4931,6 +4982,7 @@ static void drawWorldScene(const Mat4& vp) {
     if(features.wrecks && wreck.active) drawWreck(vp);
     if(features.enemy && enemyRespawn<=0.0f) drawEnemy(vp);
     if(features.boss && !bossDefeated) drawBoss(vp);
+    if(features.summonedNpcs || features.summonedBosses) drawSummonedEntities(vp);
 
     if(features.player) {
         if(respawnTimer<=0.0f && !miniBotMode) drawMech(vp);
@@ -4995,6 +5047,16 @@ static bool pointInJumpButton(float x,float y,float w,float h) {
     return dx*dx+dy*dy<=radius*radius;
 }
 
+static bool pointInAdminCommandButton(float x,float y,float w,float h){
+    const float x1=w*0.06f+12.0f;
+    const float x2=x1+142.0f;
+    const float y1=h*0.945f-48.0f;
+    const float y2=h*0.945f-14.0f;
+    return x>=x1&&x<=x2&&y>=y1&&y<=y2;
+}
+
+static void requestCommandConsole(){ commandOpenRequested=true; }
+
 static void touch(int pointerId,int action,float x,float y,float w,float h) {
     if(action==ACTION_DOWN || action==ACTION_POINTER_DOWN) {
         if(pointInAdminButton(x,y,w,h)) {
@@ -5005,6 +5067,11 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
         }
 
         if(adminOpen) {
+            if(pointInAdminCommandButton(x,y,w,h)) {
+                requestCommandConsole();
+                adminOpen=false;
+                return;
+            }
             const int feature=adminFeatureAtPoint(x,y);
             if(feature>=0) toggleAdminFeature(feature);
             return;
@@ -5128,6 +5195,46 @@ Java_com_fanmade_dg_MainActivity_00024NativeBridge_init(
 extern "C" JNIEXPORT void JNICALL
 Java_com_fanmade_dg_MainActivity_00024NativeBridge_save(JNIEnv*,jclass) {
     dg::saveGame();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_fanmade_dg_MainActivity_00024NativeBridge_consumeCommandOpenRequest(JNIEnv*,jclass){
+    const bool v=dg::commandOpenRequested;
+    dg::commandOpenRequested=false;
+    return v?JNI_TRUE:JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_fanmade_dg_MainActivity_00024NativeBridge_queueCommand(JNIEnv* env,jclass,jstring text){
+    std::string input;
+    if(text){
+        const char* chars=env->GetStringUTFChars(text,nullptr);
+        if(chars){input=chars;env->ReleaseStringUTFChars(text,chars);}
+    }
+    std::lock_guard<std::mutex> lock(dg::commandMutex);
+    dg::pendingAdminCommand=input;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_fanmade_dg_MainActivity_00024NativeBridge_consumeCommandResult(JNIEnv* env,jclass){
+    std::lock_guard<std::mutex> lock(dg::commandMutex);
+    const std::string result=dg::commandLastResult;
+    dg::commandLastResult.clear();
+    return env->NewStringUTF(result.c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_fanmade_dg_MainActivity_00024NativeBridge_getCommandSuggestions(JNIEnv* env,jclass,jstring text){
+    std::string input;
+    if(text){
+        const char* chars=env->GetStringUTFChars(text,nullptr);
+        if(chars){input=chars;env->ReleaseStringUTFChars(text,chars);}
+    }
+    const auto suggestions=dg::commandSuggestions(input);
+    std::string joined;
+    for(size_t i=0;i<suggestions.size();i++){if(i)joined.push_back('
+');joined+=suggestions[i];}
+    return env->NewStringUTF(joined.c_str());
 }
 
 extern "C" JNIEXPORT void JNICALL
