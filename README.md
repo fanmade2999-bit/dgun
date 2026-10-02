@@ -1,26 +1,21 @@
-# DG Build 0019
+# DG Build 0020
 
-Current development slice remains player + procedural terrain. Build 0019 adds an in-game ADMIN switchboard so registered runtime features can be turned on/off without changing the main loop.
+Current development slice remains player + procedural terrain, with the ADMIN switchboard now exposing the major player and gameplay subsystems individually.
 
-## Build 0019 — in-game feature switchboard
-- Permanent ADMIN button remains available even when PLAYER is disabled.
-- Feature controls are organized into PLAYER, WORLD, GAMEPLAY and UI groups.
-- Every registered FeatureFlags system has an ON/OFF control.
-- Physical features show a temporary animated world beacon/ring at their corresponding physical anchor when enabled.
-- Information-only features briefly glow in the admin panel when enabled, then return to normal.
-- Every toggle shows an immediate ON/OFF message.
-- Disabling a feature clears relevant transient input/overlay state.
-- The modular update/render orchestration remains unchanged; ADMIN changes state through the central feature switchboard.
-
-### Registered admin features
-PLAYER, TERRAIN, STRUCT, WEATHER, ECO, ENEMY, BOSS, WRECK, COMBAT, NAV, PROGRESS, DEBUG.
-
-### Visual feedback
-- PHY: temporary animated world beacon/rings above the corresponding physical anchor.
-- INFO: temporary admin-panel glow for the toggled information feature.
-- Toggle message: feature name plus ON/OFF.
+## Build 0020 — deeper feature granularity
+- PLAYER is split into MOVE, AIM, JUMP, CAMERA and RESPAWN controls.
+- GAMEPLAY is split into COMBAT, BODY, SALVAGE and GEAR.
+- WORLD retains separate TERRAIN, STRUCT, WEATHER, ECO, ENEMY, BOSS and WRECK switches.
+- UI/SYSTEM retains NAV, PROGRESS, SAVE and DEBUG.
+- Every FeatureFlags field is now represented in the ADMIN registry.
+- Disabling a subsystem clears the input or transient state associated with that subsystem.
+- Body, salvage, equipment and respawn paths no longer depend on one undifferentiated gameplay switch.
+- Save/autosave honors the SAVE switch.
+- Camera range honors the CAMERA switch; movement and jump can be disabled independently.
+- The clean terrain-only startup slice is unchanged: player movement, jump, camera and respawn are on; combat/world/gameplay extras remain off.
 
 ## Previous build history
+
 
 
 
