@@ -1,0 +1,31 @@
+BUILD: 0017
+APP ID: com.fanmade.dg
+VERSION: 0.1.7
+VERSION CODE: 17
+
+NEW IN THIS BUILD
+- Distant ecosystem populations now migrate between neighboring chunks using aggregate state.
+- Migration is driven by species-specific suitability: grazers seek food/water, scavengers seek organic resources/shelter, and hunters seek prey-rich safer chunks.
+- Migration occurs on a global 12-second ecology step rather than by player proximity.
+- Only a deterministic subset of chunks attempts migration on each step to keep reorganization gradual.
+- All moves are calculated before application, preventing same-step chain migration through multiple chunks.
+- Migration preserves total dormant population except where destination carrying capacity prevents a move.
+- Migration timing is persisted with the save so relaunching does not reset the aggregate ecology schedule.
+- Expanded-map activity traces now include migration events.
+
+SAVE FORMAT
+- Schema version: 4
+- Existing older-version saves are ignored.
+- New fields persist aggregate migration timing alongside prior dormant populations and fractional progress.
+
+ACTIVE SIMULATION
+- 96 individual actor slots remain the detailed simulation ceiling.
+- Nearby creatures receive full hunger/thirst/energy/fear/group/target behavior.
+- Distant populations remain represented by chunk-level aggregates.
+- Conceptual population can exceed the detailed actor count.
+- Aggregate distant populations can now reorganize across the full 32 × 32 chunk torus.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA
