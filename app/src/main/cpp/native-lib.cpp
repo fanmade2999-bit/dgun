@@ -519,7 +519,9 @@ static double nowSeconds() {
 // single-file prototype.
 static void initializeBodyPool();
 static void initializeEcosystem();
+static void refreshEcoChunkActivePopulation();
 static bool beginFabrication();
+static int countReadyBodies();
 static int findOtherBodySlot();
 static void saveActiveBodyToPool();
 static void loadBodyFromSlot(int slot);

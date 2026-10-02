@@ -39,7 +39,8 @@ public final class MainActivity extends Activity {
             super(MainActivity.this);
             setEGLContextClientVersion(2);
             setPreserveEGLContextOnPause(true);
-            setRenderer(new MainActivity.Renderer());
+            setRenderer(new MainActivity.Renderer(
+                    MainActivity.this.getFilesDir().getAbsolutePath()));
             setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
             setFocusable(true);
         }
@@ -92,10 +93,16 @@ public final class MainActivity extends Activity {
     }
 
     private static final class Renderer implements GLSurfaceView.Renderer {
+        private final String savePath;
+
+        Renderer(String savePath) {
+            this.savePath = savePath;
+        }
+
         @Override public void onSurfaceCreated(
                 javax.microedition.khronos.opengles.GL10 gl,
                 javax.microedition.khronos.egl.EGLConfig config) {
-            NativeBridge.init(getFilesDir().getAbsolutePath());
+            NativeBridge.init(savePath);
         }
 
         @Override public void onSurfaceChanged(
