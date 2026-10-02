@@ -142,6 +142,22 @@ static constexpr float CHUNK_WORLD_SIZE=WORLD_TILE_SIZE*float(CHUNK_TILE_COUNT);
 static constexpr int WORLD_CHUNK_COUNT=WORLD_TILE_COUNT/CHUNK_TILE_COUNT;
 static constexpr int WORLD_CHUNK_STATE_COUNT=WORLD_CHUNK_COUNT*WORLD_CHUNK_COUNT;
 static constexpr float ECO_CYCLE_SECONDS=240.0f;
+
+struct FeatureFlags {
+    bool terrain=true;
+    bool terrainDebug=false;
+    bool player=true;
+    bool playerCombat=false;
+    bool worldStructures=false;
+    bool weather=false;
+    bool ecosystem=false;
+    bool enemy=false;
+    bool boss=false;
+    bool wrecks=false;
+    bool navigationHud=false;
+    bool progressionHud=false;
+};
+static FeatureFlags features{};
 static constexpr float ECO_DAY_START=0.20f;
 static constexpr float ECO_NIGHT_START=0.78f;
 
@@ -156,7 +172,15 @@ static constexpr float BOSS_X=14.0f;
 static constexpr float BOSS_Z=8.0f;
 
 static float px=0.0f, pz=0.0f;
+static float py=0.0f;
+static float playerVerticalVelocity=0.0f;
+static bool playerGrounded=true;
+static bool jumpRequested=false;
 static float yaw=0.0f, aimPitch=0.18f;
+
+static constexpr float PLAYER_GRAVITY=-13.0f;
+static constexpr float PLAYER_JUMP_SPEED=5.2f;
+static constexpr float PLAYER_MAX_AIRBORNE_Y=6.0f;
 
 static float wrapWorld(float v) {
     while(v>=WORLD_HALF) v-=WORLD_SIZE;
@@ -399,11 +423,17 @@ static WreckState wreck;
 static int movePointer=-1;
 static int aimPointer=-1;
 static int firePointer=-1;
+static int jumpPointer=-1;
+static int cameraPointer=-1;
 static int mapPointer=-1;
 static bool mapExpanded=false;
 static float joyX=0.0f, joyY=0.0f;
 static float lastAimX=0.0f, lastAimY=0.0f;
+static float lastCameraY=0.0f;
 static constexpr float PLAYER_RADIUS=0.62f;
+static constexpr float CAMERA_DISTANCE_MIN=4.2f;
+static constexpr float CAMERA_DISTANCE_MAX=10.5f;
+static float cameraDistance=6.8f;
 
 static float enemyX=5.0f, enemyZ=-7.0f;
 static float enemyYaw=0.0f;
@@ -507,7 +537,7 @@ static double lastTime=0.0;
 static std::string savePath;
 static float autosaveTimer=0.0f;
 static constexpr uint32_t SAVE_MAGIC=0x44475356u;
-static constexpr uint32_t SAVE_VERSION=4u;
+static constexpr uint32_t SAVE_VERSION=5u;
 
 static double nowSeconds() {
     static double t=0.0;
@@ -838,6 +868,7 @@ struct LaserTrace {
 
 static LaserTrace traceLaser(Vec3 start,Vec3 dir) {
     LaserTrace result{};
+    if(!features.worldStructures) return result;
     float nearestCut=LASER_MAX_RANGE;
 
     // Sort-like repeated selection without heap allocation. There are only four
@@ -1872,13 +1903,14 @@ static void drawEcosystem(const Mat4& vp) {
 }
 
 static void drawMech(const Mat4& vp) {
+    const Vec3 origin={px,py,pz};
     const float bodyR = playerHitFlash>0 ? 0.85f : 0.18f;
     const float bodyG = playerHitFlash>0 ? 0.25f : 0.37f;
     const float bodyB = playerHitFlash>0 ? 0.20f : 0.58f;
 
     // Torso + head.
-    drawCube(vp,{px,0.95f,pz},{0.80f,0.62f,0.60f},yaw,bodyR,bodyG,bodyB);
-    drawCube(vp,localOffset({px,0,pz},{0,1.85f,-0.03f},yaw),
+    drawCube(vp,{px,py+0.95f,pz},{0.80f,0.62f,0.60f},yaw,bodyR,bodyG,bodyB);
+    drawCube(vp,localOffset(origin,{0,1.85f,-0.03f},yaw),
              {0.42f,0.34f,0.42f},yaw,0.22f,0.46f,0.70f);
 
     auto partTint=[](int part,float r,float g,float b)->Vec3 {
@@ -1898,23 +1930,23 @@ static void drawMech(const Mat4& vp) {
     const Vec3 weapon=partTint(PART_WEAPON,0.38f,0.55f,0.78f);
 
     // Shoulders and arms.
-    drawCube(vp,localOffset({px,0,pz},{-1.05f,1.05f,0.0f},yaw),
+    drawCube(vp,localOffset(origin,{-1.05f,1.05f,0.0f},yaw),
              {0.30f,0.40f,0.42f},yaw,lShoulder.x,lShoulder.y,lShoulder.z);
-    drawCube(vp,localOffset({px,0,pz},{1.05f,1.05f,0.0f},yaw),
+    drawCube(vp,localOffset(origin,{1.05f,1.05f,0.0f},yaw),
              {0.30f,0.40f,0.42f},yaw,rShoulder.x,rShoulder.y,rShoulder.z);
-    drawCube(vp,localOffset({px,0,pz},{-1.08f,0.40f,0.0f},yaw),
+    drawCube(vp,localOffset(origin,{-1.08f,0.40f,0.0f},yaw),
              {0.28f,0.48f,0.30f},yaw,lArm.x,lArm.y,lArm.z);
-    drawCube(vp,localOffset({px,0,pz},{1.08f,0.40f,0.0f},yaw),
+    drawCube(vp,localOffset(origin,{1.08f,0.40f,0.0f},yaw),
              {0.28f,0.48f,0.30f},yaw,rArm.x,rArm.y,rArm.z);
 
     // Legs.
-    drawCube(vp,localOffset({px,0,pz},{-0.40f,-0.10f,0.0f},yaw),
+    drawCube(vp,localOffset(origin,{-0.40f,-0.10f,0.0f},yaw),
              {0.30f,0.60f,0.38f},yaw,lLeg.x,lLeg.y,lLeg.z);
-    drawCube(vp,localOffset({px,0,pz},{0.40f,-0.10f,0.0f},yaw),
+    drawCube(vp,localOffset(origin,{0.40f,-0.10f,0.0f},yaw),
              {0.30f,0.60f,0.38f},yaw,rLeg.x,rLeg.y,rLeg.z);
 
     // Main laser cannon mounted at the front.
-    drawCube(vp,localOffset({px,0,pz},{0,1.45f,-0.95f},yaw),
+    drawCube(vp,localOffset(origin,{0,1.45f,-0.95f},yaw),
              {0.13f,0.13f,0.85f},yaw,weapon.x,weapon.y,weapon.z);
 }
 
@@ -1937,9 +1969,10 @@ static bool collidesObstacle(float x, float z, float radius) {
     // Procedural solids live on the toroidal tile field.
     if(proceduralSolidAt(wrappedX,wrappedZ)) return true;
 
-    for (const auto& b : OBSTACLES) {
-        // Test the obstacle in the nearest torus image. This keeps collision
-        // correct even when the player approaches a landmark across the seam.
+    if(features.worldStructures) {
+        for (const auto& b : OBSTACLES) {
+            // Test the obstacle in the nearest torus image. This keeps collision
+            // correct even when the player approaches a landmark across the seam.
         const float obstacleX=wrapWorld((b.minX+b.maxX)*0.5f);
         const float obstacleZ=wrapWorld((b.minZ+b.maxZ)*0.5f);
         const float halfX=(b.maxX-b.minX)*0.5f;
@@ -1950,13 +1983,16 @@ static bool collidesObstacle(float x, float z, float radius) {
         const float cz=std::clamp(centerDz,-halfZ,halfZ);
         const float dx=centerDx-cx;
         const float dz=centerDz-cz;
-        if(dx*dx+dz*dz<radius*radius) return true;
+            if(dx*dx+dz*dz<radius*radius) return true;
+        }
     }
 
     return false;
 }
 
 static void movePlayer(float dx, float dz) {
+    if(!features.player) return;
+
     const float nextX=wrapWorld(px+dx);
     if(!collidesObstacle(nextX,pz,PLAYER_RADIUS)) {
         px=nextX;
@@ -2118,9 +2154,10 @@ static void drawBoss(const Mat4& vp) {
 }
 
 static void drawLaser(const Mat4& vp) {
+    if(!features.playerCombat || !features.player) return;
     if(laserT<=0.0f || firePointer<0) return;
 
-    const Vec3 start=localOffset({px,0,pz},{0,1.45f,-1.70f},yaw);
+    const Vec3 start=localOffset({px,py,pz},{0,1.45f,-1.70f},yaw);
     const float horiz=std::cos(aimPitch);
     const Vec3 dir={
         std::sin(yaw)*horiz,
@@ -2410,11 +2447,12 @@ static void drawWreck(const Mat4& vp) {
 }
 
 static void drawMiniBot(const Mat4& vp) {
+    if(!features.player) return;
     if(!miniBotMode || respawnTimer>0.0f) return;
 
-    drawCube(vp,{px,0.45f,pz},{0.25f,0.25f,0.25f},yaw,
+    drawCube(vp,{px,py+0.45f,pz},{0.25f,0.25f,0.25f},yaw,
              0.35f,0.48f,0.55f);
-    drawCube(vp,{px,0.78f,pz},{0.16f,0.12f,0.16f},yaw,
+    drawCube(vp,{px,py+0.78f,pz},{0.16f,0.12f,0.16f},yaw,
              0.42f,0.66f,0.78f);
 }
 
@@ -2574,260 +2612,326 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
                1.0f,1.0f,1.0f,0.95f);
 }
 
-static void drawHud() {
-    const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
-
-    glDisable(GL_DEPTH_TEST);
-
-    // Compact minimap stays behind the gameplay HUD. The expanded map is
-    // composited last so it behaves like a real map overlay.
-    if(!mapExpanded) drawMinimap(hud,false);
-
+static void drawMinimalHud(const Mat4& hud) {
     const float pad=22.0f;
     const float barW=viewportW*0.28f;
     const float barH=18.0f;
 
-    // Green = HP. Blue = weapon heat.
     drawRect2D(hud,pad,pad,pad+barW,pad+barH,0.03f,0.04f,0.05f,0.85f);
-    drawRect2D(hud,pad,pad,pad+barW*(playerHp/100.0f),pad+barH,0.18f,0.78f,0.30f,0.92f);
+    drawRect2D(hud,pad,pad,pad+barW*std::clamp(playerHp/100.0f,0.0f,1.0f),
+               pad+barH,0.18f,0.78f,0.30f,0.92f);
     drawText2D(hud,"HP",pad+6.0f,pad+2.0f,3.0f,0.85f,1.0f,0.90f,0.95f);
 
-    const float heatY=pad+barH+10.0f;
-    drawRect2D(hud,pad,heatY,pad+barW,heatY+16.0f,0.03f,0.04f,0.05f,0.85f);
-    drawRect2D(hud,pad,heatY,pad+barW*std::min(1.0f,heat),heatY+16.0f,
-               0.18f,0.72f,0.95f,0.92f);
-    drawText2D(hud,"HEAT",pad+6.0f,heatY+1.0f,3.0f,0.80f,0.95f,1.0f,0.95f);
-
-    // Targeting reticle.
     const float cx=viewportW*0.50f;
     const float cy=viewportH*0.47f;
-    drawCircle2D(hud,cx,cy,20.0f,0.6f,0.8f,0.9f,0.70f);
+    drawCircle2D(hud,cx,cy,20.0f,0.60f,0.80f,0.90f,0.70f);
 
-    // Left-side movement control.
     const float joyBaseX=viewportW*0.18f;
     const float joyBaseY=viewportH*0.78f;
     const float joyR=viewportH*0.20f;
-    const float joyKnobX=joyBaseX+joyX*joyR;
-    const float joyKnobY=joyBaseY+joyY*joyR;
     drawCircle2D(hud,joyBaseX,joyBaseY,joyR,0.45f,0.58f,0.68f,0.42f);
-    drawCircle2D(hud,joyKnobX,joyKnobY,joyR*0.42f,0.65f,0.82f,0.95f,0.70f);
-    drawText2D(hud,"MOVE",joyBaseX-35.0f,joyBaseY-joyR-23.0f,3.0f,0.75f,0.88f,0.95f,0.82f);
+    drawCircle2D(hud,joyBaseX+joyX*joyR,joyBaseY+joyY*joyR,joyR*0.42f,
+                 0.65f,0.82f,0.95f,0.70f);
+    drawText2D(hud,"MOVE",joyBaseX-35.0f,joyBaseY-joyR-23.0f,3.0f,
+               0.75f,0.88f,0.95f,0.82f);
 
-    // Right-side aim region: swipe here, but it does not fire.
-    const float aimLabelX=viewportW*0.68f;
-    const float aimLabelY=viewportH*0.17f;
-    drawText2D(hud,"AIM",aimLabelX,aimLabelY,3.0f,0.70f,0.86f,0.96f,0.70f);
+    drawText2D(hud,"CAM",viewportW*0.49f,viewportH*0.12f,2.7f,
+               0.70f,0.86f,0.96f,0.72f);
 
-    // Body swap is only available at the home base.
-    const float swapX=viewportW*0.84f;
-    const float swapY=viewportH*0.25f;
-    const float swapR=viewportH*0.095f;
-    const bool canSwap=nearPoint(px,pz,BASE_X,BASE_Z,2.8f)
-        && findOtherBodySlot()>=0
-        && fabricationTimer<=0.0f;
-    drawCircle2D(hud,swapX,swapY,swapR,
-                 swapPointer>=0?0.70f:0.36f,
-                 swapPointer>=0?0.84f:0.55f,
-                 swapPointer>=0?0.42f:0.50f,
-                 canSwap?(swapPointer>=0?0.90f:0.55f):0.18f);
-    drawText2D(hud,"SWAP",swapX-30.0f,swapY-10.0f,3.0f,
-               1.0f,1.0f,1.0f,canSwap?0.95f:0.35f);
+    const float jumpX=viewportW*0.52f;
+    const float jumpY=viewportH*0.78f;
+    const float jumpR=viewportH*0.105f;
+    drawCircle2D(hud,jumpX,jumpY,jumpR,
+                 jumpPointer>=0?0.62f:0.36f,
+                 jumpPointer>=0?0.86f:0.58f,
+                 jumpPointer>=0?0.62f:0.50f,
+                 0.52f);
+    drawText2D(hud,"JUMP",jumpX-32.0f,jumpY-10.0f,2.7f,
+               1.0f,1.0f,1.0f,0.82f);
 
-    // Context action button: salvage at a wreck, identify at a facility,
-    // fabricate at base when enough components are available.
-    const float actionX=viewportW*0.68f;
-    const float actionY=viewportH*0.78f;
-    const float actionR=viewportH*0.115f;
-    drawCircle2D(hud,actionX,actionY,actionR,
-                 actionPointer>=0?0.55f:0.42f,
-                 actionPointer>=0?0.86f:0.58f,
-                 actionPointer>=0?0.55f:0.50f,
-                 actionPointer>=0?0.85f:0.48f);
-    drawText2D(hud,"ACT",actionX-22.0f,actionY-10.0f,3.0f,1.0f,1.0f,1.0f,0.95f);
-
-    // Explicit fire button. Swiping elsewhere on the right no longer fires.
-    const float fireX=viewportW*0.84f;
-    const float fireY=viewportH*0.78f;
-    const float fireR=viewportH*0.135f;
-    drawCircle2D(hud,fireX,fireY,fireR,
-                 firePointer>=0?0.20f:0.48f,
-                 firePointer>=0?0.84f:0.64f,
-                 firePointer>=0?1.00f:0.80f,
-                 firePointer>=0?0.85f:0.48f);
-    drawText2D(hud,"FIRE",fireX-39.0f,fireY-10.0f,3.0f,1.0f,1.0f,1.0f,0.95f);
-
-    // Body continuity readout.
-    const float bodyX=viewportW*0.73f;
-    const float bodyY=pad+8.0f;
-    char bodyText[32]{};
-    std::snprintf(bodyText,sizeof(bodyText),"BODY");
-    drawText2D(hud,bodyText,bodyX,bodyY,3.0f,0.70f,0.88f,0.96f,0.82f);
-    char countText[8]{};
-    std::snprintf(countText,sizeof(countText),"%d",countReadyBodies());
-    drawText2D(hud,countText,bodyX+35.0f,bodyY,3.0f,1.0f,1.0f,1.0f,0.95f);
-
-    char resText[32]{};
-    std::snprintf(resText,sizeof(resText),"%d",scrap);
-    drawText2D(hud,"SCRAP",viewportW*0.47f,pad+11.0f,2.4f,
-               0.72f,0.82f,0.86f,0.78f);
-    drawText2D(hud,resText,viewportW*0.56f,pad+11.0f,2.8f,
-               1.0f,1.0f,1.0f,0.95f);
-
-    char circText[32]{};
-    std::snprintf(circText,sizeof(circText),"%d",circuits);
-    drawText2D(hud,"CIRCUIT",viewportW*0.62f,pad+11.0f,2.15f,
-               0.72f,0.82f,0.86f,0.78f);
-    drawText2D(hud,circText,viewportW*0.75f,pad+11.0f,2.8f,
-               1.0f,1.0f,1.0f,0.95f);
-
-    char eqText[32]{};
-    std::snprintf(eqText,sizeof(eqText),"%d",identifiedEquipment);
-    drawText2D(hud,"ID",viewportW*0.82f,pad+46.0f,2.5f,
-               0.98f,0.86f,0.35f,0.95f);
-    drawText2D(hud,eqText,viewportW*0.87f,pad+46.0f,2.8f,
-               1.0f,0.92f,0.60f,0.95f);
-
-    if(fabricationTimer>0.0f) {
-        char fabText[32]{};
-        std::snprintf(fabText,sizeof(fabText),"%.0f",std::ceil(fabricationTimer));
-        drawText2D(hud,fabText,viewportW*0.47f,pad+44.0f,3.0f,
-                   0.65f,0.92f,0.98f,0.95f);
-    }
-
-    if(laserLanceEquipped) {
-        drawText2D(hud,"LANCE",viewportW*0.47f,pad+44.0f,2.2f,
-                   0.35f,0.90f,1.0f,0.92f);
-        char lvl[8]{};
-        std::snprintf(lvl,sizeof(lvl),"%d",laserEquipmentLevel);
-        drawText2D(hud,lvl,viewportW*0.60f,pad+44.0f,2.6f,
-                   1.0f,0.90f,0.38f,0.95f);
-    }
-
-    if(!bossDefeated) {
-        const float bw=viewportW*0.26f;
-        const float bx=viewportW*0.37f;
-        const float by=viewportH*0.07f;
-        drawText2D(hud,"BOSS",bx,by-22.0f,3.0f,
-                   1.0f,0.55f,0.30f,0.90f);
-        drawRect2D(hud,bx,by,bx+bw,by+12.0f,0.08f,0.03f,0.03f,0.85f);
-        drawRect2D(hud,bx,by,bx+bw*std::clamp(bossHp/180.0f,0.0f,1.0f),
-                   by+12.0f,0.90f,0.18f,0.08f,0.92f);
-    }
-
-    if(wreck.active) {
-        char salvage[32]{};
-        std::snprintf(salvage,sizeof(salvage),"SALVAGE");
-        drawText2D(hud,salvage,viewportW*0.73f,pad+32.0f,2.6f,
-                   0.70f,0.78f,0.72f,0.82f);
-        char pct[16]{};
-        std::snprintf(pct,sizeof(pct),"%.0f",wreck.salvagePercent);
-        drawText2D(hud,pct,viewportW*0.73f+48.0f,pad+32.0f,2.6f,
-                   0.85f,0.92f,0.82f,0.95f);
-    }
-
-    if(miniBotMode) {
-        drawText2D(hud,"BOT",viewportW*0.47f,viewportH*0.80f,3.0f,
-                   0.70f,0.86f,0.92f,0.75f);
-    }
-
-    // Wrapped world coordinates + chunk/local-tile coordinates.
-    char xText[32]{};
-    char zText[32]{};
-    char yText[32]{};
-    char cText[32]{};
-    const int worldY=int(std::round(tileHeight(floorTile(px),floorTile(pz))));
-    std::snprintf(xText,sizeof(xText),"X%d",(int)std::round(wrapWorld(px)));
-    std::snprintf(yText,sizeof(yText),"Y%d",worldY);
-    std::snprintf(zText,sizeof(zText),"Z%d",(int)std::round(wrapWorld(pz)));
-    std::snprintf(cText,sizeof(cText),"C%d,%d T%d,%d",
-                  chunkCoord(px),chunkCoord(pz),
-                  chunkLocalTile(px),chunkLocalTile(pz));
-    drawText2D(hud,xText,viewportW*0.02f,viewportH*0.90f,2.4f,
+    char coords[48]{};
+    std::snprintf(coords,sizeof(coords),"X%d Y%d Z%d",
+                  (int)std::round(wrapWorld(px)),
+                  (int)std::round(py),
+                  (int)std::round(wrapWorld(pz)));
+    drawText2D(hud,coords,viewportW*0.02f,viewportH*0.90f,2.2f,
                0.72f,0.86f,0.92f,0.80f);
-    drawText2D(hud,yText,viewportW*0.08f,viewportH*0.90f,2.4f,
-               0.72f,0.86f,0.92f,0.80f);
-    drawText2D(hud,zText,viewportW*0.14f,viewportH*0.90f,2.4f,
-               0.72f,0.86f,0.92f,0.80f);
-    drawText2D(hud,cText,viewportW*0.15f,viewportH*0.90f,2.15f,
-               0.64f,0.80f,0.88f,0.78f);
-
-    char ecoText[32]{};
-    std::snprintf(ecoText,sizeof(ecoText),"ECO%d/%d",
-                  ecosystemPopulation,ecoTotalPopulation());
-    drawText2D(hud,ecoText,viewportW*0.30f,viewportH*0.90f,2.15f,
-               0.54f,0.76f,0.68f,0.80f);
-
-    char cycleText[32]{};
-    std::snprintf(cycleText,sizeof(cycleText),"C%d",ecosystemCycle);
-    drawText2D(hud,cycleText,viewportW*0.39f,viewportH*0.90f,2.05f,
-               0.55f,0.72f,0.80f,0.72f);
-
-    const bool night=ecoIsNight(ecosystemClock);
-    drawText2D(hud,night?"NIGHT":"DAY",viewportW*0.44f,viewportH*0.90f,2.05f,
-               0.70f,0.76f,0.86f,0.72f);
-
-    const float rain=ecoRainIntensity(ecosystemClock);
-    if(rain>0.48f) {
-        drawText2D(hud,"RAIN",viewportW*0.54f,viewportH*0.90f,2.05f,
-                   0.50f,0.70f,0.86f,0.72f);
-    }
-
-    if(ecosystemLastEventTimer>0.0f) {
-        const char* eventText=(ecosystemLastEvent==1)?"BIRTH":
-                              (ecosystemLastEvent==2)?"HUNT":
-                              (ecosystemLastEvent==3)?"DEATH":
-                              (ecosystemLastEvent==4)?"FOOD":
-                              (ecosystemLastEvent==5)?"CYCLE":
-                              (ecosystemLastEvent==6)?"SHOT":
-                              (ecosystemLastEvent==7)?"MOVE":"";
-        if(eventText[0]) {
-            drawText2D(hud,eventText,viewportW*0.63f,viewportH*0.90f,2.05f,
-                       0.60f,0.80f,0.68f,0.72f);
-        }
-    }
-
-    // The HUD exposes local ecology, not a player-centric quest state.
-    char localEcoText[32]{};
-    const EcoChunkState& localChunk=ecoChunkAt(px,pz);
-    const int localTotal=ecoChunkTotalPopulation(chunkCoord(px),chunkCoord(pz));
-    std::snprintf(localEcoText,sizeof(localEcoText),"E%d/%d F%d W%d",
-                  localChunk.population,
-                  localTotal,
-                  int(std::round(localChunk.food*9.0f)),
-                  int(std::round(localChunk.water*9.0f)));
-    drawText2D(hud,localEcoText,viewportW*0.75f,viewportH*0.935f,1.85f,
-               0.45f,0.68f,0.58f,0.72f);
-
-    const float mapX=viewportW*0.92f;
-    const float mapY=viewportH*0.12f;
-    const float mapR=viewportH*0.055f;
-    drawCircle2D(hud,mapX,mapY,mapR,
-                 mapExpanded?0.72f:0.34f,
-                 mapExpanded?0.82f:0.54f,
-                 mapExpanded?0.42f:0.52f,
-                 0.75f);
-    drawText2D(hud,"MAP",mapX-22.0f,mapY-10.0f,2.4f,1.0f,1.0f,1.0f,0.95f);
-
-
-    // Context hint: the ACT button only does something when a relevant
-    // interaction is nearby.
-    if(nearPoint(px,pz,wreck.x,wreck.z,2.0f) && wreck.active) {
-        drawText2D(hud,"SALVAGE",viewportW*0.34f,viewportH*0.18f,2.6f,
-                   0.80f,0.92f,0.80f,0.82f);
-    } else if(nearPoint(px,pz,FACILITY_X,FACILITY_Z,2.6f) && unknownEquipment>0) {
-        drawText2D(hud,"IDENTIFY",viewportW*0.36f,viewportH*0.18f,2.6f,
-                   0.80f,0.90f,0.98f,0.82f);
-    } else if(nearPoint(px,pz,BASE_X,BASE_Z,2.8f) && fabricationSlot<0) {
-        drawText2D(hud,"BODY",viewportW*0.42f,viewportH*0.18f,2.6f,
-                   0.75f,0.88f,0.96f,0.82f);
-    }
-
-    if(mapExpanded) {
-        drawMinimap(hud,true);
-    }
-
-    glEnable(GL_DEPTH_TEST);
 }
+
+static void drawHud() {
+    const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
+    glDisable(GL_DEPTH_TEST);
+
+    const bool minimal =
+        !features.playerCombat &&
+        !features.worldStructures &&
+        !features.weather &&
+        !features.ecosystem &&
+        !features.enemy &&
+        !features.boss &&
+        !features.wrecks &&
+        !features.navigationHud &&
+        !features.progressionHud;
+
+    if(minimal) {
+        drawMinimalHud(hud);
+        glEnable(GL_DEPTH_TEST);
+        return;
+    }
+    const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
+    
+        glDisable(GL_DEPTH_TEST);
+    
+        // Compact minimap stays behind the gameplay HUD. The expanded map is
+        // composited last so it behaves like a real map overlay.
+        if(!mapExpanded) drawMinimap(hud,false);
+    
+        const float pad=22.0f;
+        const float barW=viewportW*0.28f;
+        const float barH=18.0f;
+    
+        // Green = HP. Blue = weapon heat.
+        drawRect2D(hud,pad,pad,pad+barW,pad+barH,0.03f,0.04f,0.05f,0.85f);
+        drawRect2D(hud,pad,pad,pad+barW*(playerHp/100.0f),pad+barH,0.18f,0.78f,0.30f,0.92f);
+        drawText2D(hud,"HP",pad+6.0f,pad+2.0f,3.0f,0.85f,1.0f,0.90f,0.95f);
+    
+        const float heatY=pad+barH+10.0f;
+        drawRect2D(hud,pad,heatY,pad+barW,heatY+16.0f,0.03f,0.04f,0.05f,0.85f);
+        drawRect2D(hud,pad,heatY,pad+barW*std::min(1.0f,heat),heatY+16.0f,
+                   0.18f,0.72f,0.95f,0.92f);
+        drawText2D(hud,"HEAT",pad+6.0f,heatY+1.0f,3.0f,0.80f,0.95f,1.0f,0.95f);
+    
+        // Targeting reticle.
+        const float cx=viewportW*0.50f;
+        const float cy=viewportH*0.47f;
+        drawCircle2D(hud,cx,cy,20.0f,0.6f,0.8f,0.9f,0.70f);
+    
+        // Left-side movement control.
+        const float joyBaseX=viewportW*0.18f;
+        const float joyBaseY=viewportH*0.78f;
+        const float joyR=viewportH*0.20f;
+        const float joyKnobX=joyBaseX+joyX*joyR;
+        const float joyKnobY=joyBaseY+joyY*joyR;
+        drawCircle2D(hud,joyBaseX,joyBaseY,joyR,0.45f,0.58f,0.68f,0.42f);
+        drawCircle2D(hud,joyKnobX,joyKnobY,joyR*0.42f,0.65f,0.82f,0.95f,0.70f);
+        drawText2D(hud,"MOVE",joyBaseX-35.0f,joyBaseY-joyR-23.0f,3.0f,0.75f,0.88f,0.95f,0.82f);
+    
+        // Right-side aim region: swipe here, but it does not fire.
+        const float aimLabelX=viewportW*0.68f;
+        const float aimLabelY=viewportH*0.17f;
+        drawText2D(hud,"AIM",aimLabelX,aimLabelY,3.0f,0.70f,0.86f,0.96f,0.70f);
+    
+        // Body swap is only available at the home base.
+        const float swapX=viewportW*0.84f;
+        const float swapY=viewportH*0.25f;
+        const float swapR=viewportH*0.095f;
+        const bool canSwap=nearPoint(px,pz,BASE_X,BASE_Z,2.8f)
+            && findOtherBodySlot()>=0
+            && fabricationTimer<=0.0f;
+        drawCircle2D(hud,swapX,swapY,swapR,
+                     swapPointer>=0?0.70f:0.36f,
+                     swapPointer>=0?0.84f:0.55f,
+                     swapPointer>=0?0.42f:0.50f,
+                     canSwap?(swapPointer>=0?0.90f:0.55f):0.18f);
+        drawText2D(hud,"SWAP",swapX-30.0f,swapY-10.0f,3.0f,
+                   1.0f,1.0f,1.0f,canSwap?0.95f:0.35f);
+    
+        // Context action button: salvage at a wreck, identify at a facility,
+        // fabricate at base when enough components are available.
+        const float actionX=viewportW*0.68f;
+        const float actionY=viewportH*0.78f;
+        const float actionR=viewportH*0.115f;
+        drawCircle2D(hud,actionX,actionY,actionR,
+                     actionPointer>=0?0.55f:0.42f,
+                     actionPointer>=0?0.86f:0.58f,
+                     actionPointer>=0?0.55f:0.50f,
+                     actionPointer>=0?0.85f:0.48f);
+        drawText2D(hud,"ACT",actionX-22.0f,actionY-10.0f,3.0f,1.0f,1.0f,1.0f,0.95f);
+    
+        // Explicit fire button. Swiping elsewhere on the right no longer fires.
+        const float fireX=viewportW*0.84f;
+        const float fireY=viewportH*0.78f;
+        const float fireR=viewportH*0.135f;
+        drawCircle2D(hud,fireX,fireY,fireR,
+                     firePointer>=0?0.20f:0.48f,
+                     firePointer>=0?0.84f:0.64f,
+                     firePointer>=0?1.00f:0.80f,
+                     firePointer>=0?0.85f:0.48f);
+        drawText2D(hud,"FIRE",fireX-39.0f,fireY-10.0f,3.0f,1.0f,1.0f,1.0f,0.95f);
+    
+        // Body continuity readout.
+        const float bodyX=viewportW*0.73f;
+        const float bodyY=pad+8.0f;
+        char bodyText[32]{};
+        std::snprintf(bodyText,sizeof(bodyText),"BODY");
+        drawText2D(hud,bodyText,bodyX,bodyY,3.0f,0.70f,0.88f,0.96f,0.82f);
+        char countText[8]{};
+        std::snprintf(countText,sizeof(countText),"%d",countReadyBodies());
+        drawText2D(hud,countText,bodyX+35.0f,bodyY,3.0f,1.0f,1.0f,1.0f,0.95f);
+    
+        char resText[32]{};
+        std::snprintf(resText,sizeof(resText),"%d",scrap);
+        drawText2D(hud,"SCRAP",viewportW*0.47f,pad+11.0f,2.4f,
+                   0.72f,0.82f,0.86f,0.78f);
+        drawText2D(hud,resText,viewportW*0.56f,pad+11.0f,2.8f,
+                   1.0f,1.0f,1.0f,0.95f);
+    
+        char circText[32]{};
+        std::snprintf(circText,sizeof(circText),"%d",circuits);
+        drawText2D(hud,"CIRCUIT",viewportW*0.62f,pad+11.0f,2.15f,
+                   0.72f,0.82f,0.86f,0.78f);
+        drawText2D(hud,circText,viewportW*0.75f,pad+11.0f,2.8f,
+                   1.0f,1.0f,1.0f,0.95f);
+    
+        char eqText[32]{};
+        std::snprintf(eqText,sizeof(eqText),"%d",identifiedEquipment);
+        drawText2D(hud,"ID",viewportW*0.82f,pad+46.0f,2.5f,
+                   0.98f,0.86f,0.35f,0.95f);
+        drawText2D(hud,eqText,viewportW*0.87f,pad+46.0f,2.8f,
+                   1.0f,0.92f,0.60f,0.95f);
+    
+        if(fabricationTimer>0.0f) {
+            char fabText[32]{};
+            std::snprintf(fabText,sizeof(fabText),"%.0f",std::ceil(fabricationTimer));
+            drawText2D(hud,fabText,viewportW*0.47f,pad+44.0f,3.0f,
+                       0.65f,0.92f,0.98f,0.95f);
+        }
+    
+        if(laserLanceEquipped) {
+            drawText2D(hud,"LANCE",viewportW*0.47f,pad+44.0f,2.2f,
+                       0.35f,0.90f,1.0f,0.92f);
+            char lvl[8]{};
+            std::snprintf(lvl,sizeof(lvl),"%d",laserEquipmentLevel);
+            drawText2D(hud,lvl,viewportW*0.60f,pad+44.0f,2.6f,
+                       1.0f,0.90f,0.38f,0.95f);
+        }
+    
+        if(!bossDefeated) {
+            const float bw=viewportW*0.26f;
+            const float bx=viewportW*0.37f;
+            const float by=viewportH*0.07f;
+            drawText2D(hud,"BOSS",bx,by-22.0f,3.0f,
+                       1.0f,0.55f,0.30f,0.90f);
+            drawRect2D(hud,bx,by,bx+bw,by+12.0f,0.08f,0.03f,0.03f,0.85f);
+            drawRect2D(hud,bx,by,bx+bw*std::clamp(bossHp/180.0f,0.0f,1.0f),
+                       by+12.0f,0.90f,0.18f,0.08f,0.92f);
+        }
+    
+        if(wreck.active) {
+            char salvage[32]{};
+            std::snprintf(salvage,sizeof(salvage),"SALVAGE");
+            drawText2D(hud,salvage,viewportW*0.73f,pad+32.0f,2.6f,
+                       0.70f,0.78f,0.72f,0.82f);
+            char pct[16]{};
+            std::snprintf(pct,sizeof(pct),"%.0f",wreck.salvagePercent);
+            drawText2D(hud,pct,viewportW*0.73f+48.0f,pad+32.0f,2.6f,
+                       0.85f,0.92f,0.82f,0.95f);
+        }
+    
+        if(miniBotMode) {
+            drawText2D(hud,"BOT",viewportW*0.47f,viewportH*0.80f,3.0f,
+                       0.70f,0.86f,0.92f,0.75f);
+        }
+    
+        // Wrapped world coordinates + chunk/local-tile coordinates.
+        char xText[32]{};
+        char zText[32]{};
+        char yText[32]{};
+        char cText[32]{};
+        const int worldY=int(std::round(tileHeight(floorTile(px),floorTile(pz))));
+        std::snprintf(xText,sizeof(xText),"X%d",(int)std::round(wrapWorld(px)));
+        std::snprintf(yText,sizeof(yText),"Y%d",worldY);
+        std::snprintf(zText,sizeof(zText),"Z%d",(int)std::round(wrapWorld(pz)));
+        std::snprintf(cText,sizeof(cText),"C%d,%d T%d,%d",
+                      chunkCoord(px),chunkCoord(pz),
+                      chunkLocalTile(px),chunkLocalTile(pz));
+        drawText2D(hud,xText,viewportW*0.02f,viewportH*0.90f,2.4f,
+                   0.72f,0.86f,0.92f,0.80f);
+        drawText2D(hud,yText,viewportW*0.08f,viewportH*0.90f,2.4f,
+                   0.72f,0.86f,0.92f,0.80f);
+        drawText2D(hud,zText,viewportW*0.14f,viewportH*0.90f,2.4f,
+                   0.72f,0.86f,0.92f,0.80f);
+        drawText2D(hud,cText,viewportW*0.15f,viewportH*0.90f,2.15f,
+                   0.64f,0.80f,0.88f,0.78f);
+    
+        char ecoText[32]{};
+        std::snprintf(ecoText,sizeof(ecoText),"ECO%d/%d",
+                      ecosystemPopulation,ecoTotalPopulation());
+        drawText2D(hud,ecoText,viewportW*0.30f,viewportH*0.90f,2.15f,
+                   0.54f,0.76f,0.68f,0.80f);
+    
+        char cycleText[32]{};
+        std::snprintf(cycleText,sizeof(cycleText),"C%d",ecosystemCycle);
+        drawText2D(hud,cycleText,viewportW*0.39f,viewportH*0.90f,2.05f,
+                   0.55f,0.72f,0.80f,0.72f);
+    
+        const bool night=ecoIsNight(ecosystemClock);
+        drawText2D(hud,night?"NIGHT":"DAY",viewportW*0.44f,viewportH*0.90f,2.05f,
+                   0.70f,0.76f,0.86f,0.72f);
+    
+        const float rain=ecoRainIntensity(ecosystemClock);
+        if(rain>0.48f) {
+            drawText2D(hud,"RAIN",viewportW*0.54f,viewportH*0.90f,2.05f,
+                       0.50f,0.70f,0.86f,0.72f);
+        }
+    
+        if(ecosystemLastEventTimer>0.0f) {
+            const char* eventText=(ecosystemLastEvent==1)?"BIRTH":
+                                  (ecosystemLastEvent==2)?"HUNT":
+                                  (ecosystemLastEvent==3)?"DEATH":
+                                  (ecosystemLastEvent==4)?"FOOD":
+                                  (ecosystemLastEvent==5)?"CYCLE":
+                                  (ecosystemLastEvent==6)?"SHOT":
+                                  (ecosystemLastEvent==7)?"MOVE":"";
+            if(eventText[0]) {
+                drawText2D(hud,eventText,viewportW*0.63f,viewportH*0.90f,2.05f,
+                           0.60f,0.80f,0.68f,0.72f);
+            }
+        }
+    
+        // The HUD exposes local ecology, not a player-centric quest state.
+        char localEcoText[32]{};
+        const EcoChunkState& localChunk=ecoChunkAt(px,pz);
+        const int localTotal=ecoChunkTotalPopulation(chunkCoord(px),chunkCoord(pz));
+        std::snprintf(localEcoText,sizeof(localEcoText),"E%d/%d F%d W%d",
+                      localChunk.population,
+                      localTotal,
+                      int(std::round(localChunk.food*9.0f)),
+                      int(std::round(localChunk.water*9.0f)));
+        drawText2D(hud,localEcoText,viewportW*0.75f,viewportH*0.935f,1.85f,
+                   0.45f,0.68f,0.58f,0.72f);
+    
+        const float mapX=viewportW*0.92f;
+        const float mapY=viewportH*0.12f;
+        const float mapR=viewportH*0.055f;
+        drawCircle2D(hud,mapX,mapY,mapR,
+                     mapExpanded?0.72f:0.34f,
+                     mapExpanded?0.82f:0.54f,
+                     mapExpanded?0.42f:0.52f,
+                     0.75f);
+        drawText2D(hud,"MAP",mapX-22.0f,mapY-10.0f,2.4f,1.0f,1.0f,1.0f,0.95f);
+    
+    
+        // Context hint: the ACT button only does something when a relevant
+        // interaction is nearby.
+        if(nearPoint(px,pz,wreck.x,wreck.z,2.0f) && wreck.active) {
+            drawText2D(hud,"SALVAGE",viewportW*0.34f,viewportH*0.18f,2.6f,
+                       0.80f,0.92f,0.80f,0.82f);
+        } else if(nearPoint(px,pz,FACILITY_X,FACILITY_Z,2.6f) && unknownEquipment>0) {
+            drawText2D(hud,"IDENTIFY",viewportW*0.36f,viewportH*0.18f,2.6f,
+                       0.80f,0.90f,0.98f,0.82f);
+        } else if(nearPoint(px,pz,BASE_X,BASE_Z,2.8f) && fabricationSlot<0) {
+            drawText2D(hud,"BODY",viewportW*0.42f,viewportH*0.18f,2.6f,
+                       0.75f,0.88f,0.96f,0.82f);
+        }
+    
+        if(mapExpanded) {
+            drawMinimap(hud,true);
+        }
+    
+        glEnable(GL_DEPTH_TEST);
+}
+
 
 static void updateAim(float x, float y) {
     const float dx=x-lastAimX;
@@ -2844,7 +2948,7 @@ static void updateAim(float x, float y) {
 }
 
 static Vec3 playerPartCenter(int part) {
-    return localOffset({px,0,pz},PLAYER_PART_DEFS[part].localCenter,yaw);
+    return localOffset({px,py,pz},PLAYER_PART_DEFS[part].localCenter,yaw);
 }
 
 static int closestPlayerPartOnRay(Vec3 start,Vec3 dir,float maxDistance) {
@@ -2994,6 +3098,11 @@ static int currentBodySalvageClass() {
 static float calculatePlayerHp();
 
 static void resetPlayerBody() {
+    py=0.0f;
+    playerVerticalVelocity=0.0f;
+    playerGrounded=true;
+    jumpRequested=false;
+
     for(int i=0;i<PART_COUNT;i++) {
         playerParts[i].maxHp=PLAYER_PART_DEFS[i].maxHp;
         playerParts[i].hp=PLAYER_PART_DEFS[i].maxHp;
@@ -3036,6 +3145,10 @@ static void beginPlayerDeath() {
     bodySlots[activeBodySlot].occupied=false;
 
     miniBotMode=false;
+    py=0.0f;
+    playerVerticalVelocity=0.0f;
+    playerGrounded=true;
+    jumpRequested=false;
     respawnTimer=2.20f;
     laserT=0.0f;
     firePointer=-1;
@@ -3045,7 +3158,11 @@ static void beginPlayerDeath() {
 
 
 struct SaveSnapshot {
-    float px=0.0f, pz=0.0f, yaw=0.0f, aimPitch=0.18f;
+    float px=0.0f, pz=0.0f, py=0.0f;
+    float playerVerticalVelocity=0.0f;
+    uint8_t playerGrounded=1;
+    float yaw=0.0f, aimPitch=0.18f;
+    float cameraDistance=6.8f;
     float heat=0.0f, playerHp=100.0f, respawnTimer=0.0f, chassisIntegrity=100.0f;
     BodyPartState playerParts[PART_COUNT]{};
 
@@ -3291,8 +3408,12 @@ static bool saveGame() {
 
     savePod(payload,px);
     savePod(payload,pz);
+    savePod(payload,py);
+    savePod(payload,playerVerticalVelocity);
+    saveBool(payload,playerGrounded);
     savePod(payload,yaw);
     savePod(payload,aimPitch);
+    savePod(payload,cameraDistance);
     savePod(payload,heat);
     savePod(payload,playerHp);
     savePod(payload,respawnTimer);
@@ -3432,8 +3553,12 @@ static bool loadGame() {
     auto readAll=[&]() -> bool {
         if(!loadPod(payload,cursor,snapshot->px) ||
            !loadPod(payload,cursor,snapshot->pz) ||
+           !loadPod(payload,cursor,snapshot->py) ||
+           !loadPod(payload,cursor,snapshot->playerVerticalVelocity) ||
+           !loadBool(payload,cursor,snapshot->playerGrounded) ||
            !loadPod(payload,cursor,snapshot->yaw) ||
            !loadPod(payload,cursor,snapshot->aimPitch) ||
+           !loadPod(payload,cursor,snapshot->cameraDistance) ||
            !loadPod(payload,cursor,snapshot->heat) ||
            !loadPod(payload,cursor,snapshot->playerHp) ||
            !loadPod(payload,cursor,snapshot->respawnTimer) ||
@@ -3526,8 +3651,14 @@ static bool loadGame() {
 
     px=wrapWorld(snapshot->px);
     pz=wrapWorld(snapshot->pz);
+    py=std::clamp(snapshot->py,0.0f,PLAYER_MAX_AIRBORNE_Y);
+    playerVerticalVelocity=std::clamp(snapshot->playerVerticalVelocity,-20.0f,20.0f);
+    playerGrounded=snapshot->playerGrounded!=0 && py<=0.001f;
     yaw=snapshot->yaw;
     aimPitch=std::clamp(snapshot->aimPitch,-0.25f,0.38f);
+    cameraDistance=std::clamp(snapshot->cameraDistance,
+                              CAMERA_DISTANCE_MIN,CAMERA_DISTANCE_MAX);
+    jumpRequested=false;
     heat=std::clamp(snapshot->heat,0.0f,1.0f);
     playerHp=std::clamp(snapshot->playerHp,0.0f,100.0f);
     respawnTimer=std::max(0.0f,snapshot->respawnTimer);
@@ -3591,6 +3722,8 @@ static bool loadGame() {
     movePointer=-1;
     aimPointer=-1;
     firePointer=-1;
+    jumpPointer=-1;
+    cameraPointer=-1;
     mapPointer=-1;
     actionPointer=-1;
     swapPointer=-1;
@@ -3599,6 +3732,7 @@ static bool loadGame() {
     mapExpanded=false;
     lastAimX=0.0f;
     lastAimY=0.0f;
+    lastCameraY=0.0f;
     laserT=0.0f;
     enemyLaserT=0.0f;
     bossLaserT=0.0f;
@@ -3611,6 +3745,7 @@ static bool loadGame() {
 }
 
 static void updateEnemy(float dt) {
+    if(!features.enemy) return;
     if(enemyRespawn>0.0f) {
         enemyRespawn=std::max(0.0f,enemyRespawn-dt);
         if(enemyRespawn<=0.0f) {
@@ -3674,6 +3809,7 @@ static void updateEnemy(float dt) {
 }
 
 static void updateBoss(float dt) {
+    if(!features.boss) return;
     if(bossDefeated) return;
 
     const float dx=wrappedDelta(bossX,px);
@@ -3717,200 +3853,271 @@ static void updateBoss(float dt) {
     }
 }
 
-static void update(float dt) {
-    autosaveTimer+=dt;
-    if(fabricationTimer>0.0f) {
-        fabricationTimer=std::max(0.0f,fabricationTimer-dt);
-        if(fabricationTimer<=0.0f) completeFabrication();
+static void updatePlayerPhysics(float dt) {
+    if(!features.player) return;
+
+    if(jumpRequested && playerGrounded && respawnTimer<=0.0f) {
+        playerVerticalVelocity=PLAYER_JUMP_SPEED;
+        playerGrounded=false;
+    }
+    jumpRequested=false;
+
+    playerVerticalVelocity += PLAYER_GRAVITY*dt;
+    py += playerVerticalVelocity*dt;
+
+    if(py<=0.0f) {
+        py=0.0f;
+        playerVerticalVelocity=0.0f;
+        playerGrounded=true;
+    } else if(py>PLAYER_MAX_AIRBORNE_Y) {
+        py=PLAYER_MAX_AIRBORNE_Y;
+        playerVerticalVelocity=std::min(0.0f,playerVerticalVelocity);
+        playerGrounded=false;
+    } else {
+        playerGrounded=false;
+    }
+}
+
+static void finishPlayerRespawn() {
+    px=wrapWorld(BASE_X);
+    pz=wrapWorld(BASE_Z);
+    py=0.0f;
+    playerVerticalVelocity=0.0f;
+    playerGrounded=true;
+    yaw=0.0f;
+    aimPitch=0.18f;
+    cameraDistance=6.8f;
+
+    const int nextBody=findOtherBodySlot();
+    if(nextBody>=0) {
+        miniBotMode=false;
+        loadBodyFromSlot(nextBody);
+        bodySlots[nextBody].occupied=true;
+    } else {
+        miniBotMode=true;
+        resetPlayerBody();
+        playerHp=55.0f;
+        chassisIntegrity=55.0f;
     }
 
-    const bool disabled = respawnTimer>0.0f;
+    actionPointer=-1;
+    actionPointerActive=false;
+    jumpRequested=false;
+}
 
-    if(disabled) {
+static void updatePlayerSystem(float dt) {
+    if(!features.player) return;
+
+    if(respawnTimer>0.0f) {
         respawnTimer=std::max(0.0f,respawnTimer-dt);
         heat=std::max(0.0f,heat-dt*0.7f);
         laserT=0.0f;
         firePointer=-1;
+        jumpRequested=false;
+        py=0.0f;
+        playerVerticalVelocity=0.0f;
+        playerGrounded=true;
 
-        if(respawnTimer<=0.0f) {
-            px=wrapWorld(BASE_X);
-            pz=wrapWorld(BASE_Z);
-            yaw=0.0f;
-            aimPitch=0.18f;
+        if(respawnTimer<=0.0f) finishPlayerRespawn();
+        return;
+    }
 
-            const int nextBody=findOtherBodySlot();
+    const float dead=0.15f;
+    float mx=(std::fabs(joyX)>dead)?joyX:0.0f;
+    float my=(std::fabs(joyY)>dead)?joyY:0.0f;
 
-            if(nextBody>=0) {
-                // Consciousness reaches the main base and transfers into an
-                // already assembled chassis. The destroyed chassis remains at
-                // its world position as the wreck we recorded above.
-                miniBotMode=false;
-                loadBodyFromSlot(nextBody);
-                bodySlots[nextBody].occupied=true;
-            } else {
-                // No complete chassis remains. A tiny recovery bot is deployed
-                // by the base and becomes the temporary body.
-                miniBotMode=true;
-                resetPlayerBody();
-                playerHp=55.0f;
-                chassisIntegrity=55.0f;
-            }
+    const float moveLen=std::sqrt(mx*mx+my*my);
+    if(moveLen>1.0f) {
+        mx/=moveLen;
+        my/=moveLen;
+    }
 
-            // Keep movement pointer alive. If the player's thumb is still on the
-            // joystick, movement resumes immediately after deployment.
-            actionPointer=-1;
-            actionPointerActive=false;
-        }
+    const Vec3 forward={std::sin(yaw),0,-std::cos(yaw)};
+    const Vec3 right={std::cos(yaw),0,std::sin(yaw)};
+    const Vec3 move=add(mul(forward,-my),mul(right,mx));
+
+    const float speed=miniBotMode ? 2.2f : 3.6f;
+    movePlayer(move.x*speed*dt,move.z*speed*dt);
+    updatePlayerPhysics(dt);
+
+    if(features.playerCombat && !miniBotMode && firePointer>=0 && heat<0.92f) {
+        worldNoise=std::min(1.0f,worldNoise+dt*3.5f);
+        heat=std::min(1.0f,heat+dt*laserHeatRate());
+        laserT=0.08f;
     } else {
-        const float dead=0.15f;
-        float mx=(std::fabs(joyX)>dead)?joyX:0.0f;
-        float my=(std::fabs(joyY)>dead)?joyY:0.0f;
-
-        const float moveLen=std::sqrt(mx*mx+my*my);
-        if(moveLen>1.0f) {
-            mx/=moveLen;
-            my/=moveLen;
-        }
-
-        const Vec3 forward={std::sin(yaw),0,-std::cos(yaw)};
-        const Vec3 right={std::cos(yaw),0,std::sin(yaw)};
-        const Vec3 move=add(mul(forward,-my),mul(right,mx));
-
-        const float speed=miniBotMode ? 2.2f : 3.6f;
-        movePlayer(move.x*speed*dt,move.z*speed*dt);
-
-        if(!miniBotMode && firePointer>=0 && heat<0.92f) {
-            worldNoise=std::min(1.0f,worldNoise+dt*3.5f);
-            heat=std::min(1.0f,heat+dt*laserHeatRate());
-            laserT=0.08f;
-        } else {
-            heat=std::max(0.0f,heat-dt*0.42f);
-            laserT=std::max(0.0f,laserT-dt);
-        }
+        heat=std::max(0.0f,heat-dt*0.42f);
+        laserT=std::max(0.0f,laserT-dt);
     }
+}
 
-    updateEcosystem(dt);
-    updateEnemy(dt);
-    updateBoss(dt);
-
-    if(!savePath.empty() && autosaveTimer>=5.0f) {
-        saveGame();
+static void updateProgressionTimers(float dt) {
+    if(fabricationTimer>0.0f) {
+        fabricationTimer=std::max(0.0f,fabricationTimer-dt);
+        if(fabricationTimer<=0.0f) completeFabrication();
     }
+}
 
+static void updateWorldSystems(float dt) {
+    if(features.ecosystem) updateEcosystem(dt);
+    if(features.enemy) updateEnemy(dt);
+    if(features.boss) updateBoss(dt);
+}
+
+static void updateTransientSystems(float dt) {
     enemyLaserT=std::max(0.0f,enemyLaserT-dt);
     bossLaserT=std::max(0.0f,bossLaserT-dt);
     playerHitFlash=std::max(0.0f,playerHitFlash-dt);
     enemyHitFlash=std::max(0.0f,enemyHitFlash-dt);
     bossHitFlash=std::max(0.0f,bossHitFlash-dt);
+}
 
-    // Laser hit test uses the same obstruction trace as the visual beam.
-    // A low-resistance obstacle can be penetrated; a high-resistance obstacle
-    // stops the beam and prevents the target behind it from taking full damage.
+static void resolvePlayerWeaponHits(float dt) {
+    if(!features.playerCombat || !features.player) return;
     if(laserT>0.0f && firePointer>=0 && enemyRespawn<=0.0f && respawnTimer<=0.0f) {
-        const Vec3 start=localOffset({px,0,pz},{0,1.45f,-1.70f},yaw);
-        const float horiz=std::cos(aimPitch);
-        const Vec3 dir={
-            std::sin(yaw)*horiz,
-            -std::sin(aimPitch),
-            -std::cos(yaw)*horiz
-        };
-        const LaserTrace trace=traceLaser(start,dir);
-        float maxBeamDistance=trace.distance;
-        if(dir.y<0.0f) {
-            const float groundDistance=start.y/(-dir.y);
-            if(groundDistance>0.02f) maxBeamDistance=std::min(maxBeamDistance,groundDistance);
-        }
-
-        const Vec3 enemyImage={
-            nearestWorldImage(enemyX,px),0.95f,nearestWorldImage(enemyZ,pz)
-        };
-        const Vec3 toEnemy=sub(enemyImage,start);
-        const float along=dot(toEnemy,dir);
-
-        if(along>0.0f && along<=maxBeamDistance+0.05f && along<LASER_MAX_RANGE) {
-            const Vec3 closest=add(start,mul(dir,along));
-            const Vec3 enemyCenter={enemyX,0.95f,enemyZ};
-            const float d2=dot(sub(enemyCenter,closest),sub(enemyCenter,closest));
-            if(d2<1.65f) {
-                enemyHp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
-                enemyHitFlash=0.08f;
-                if(enemyHp<=0.0f) {
-                    enemyHp=0.0f;
-                    enemyRespawn=2.0f;
-                    enemyHitFlash=0.35f;
-                }
-            }
-        }
-
-        if(!bossDefeated) {
-            const Vec3 bossImage={
-                nearestWorldImage(bossX,px),1.35f,nearestWorldImage(bossZ,pz)
+            const Vec3 start=localOffset({px,py,pz},{0,1.45f,-1.70f},yaw);
+            const float horiz=std::cos(aimPitch);
+            const Vec3 dir={
+                std::sin(yaw)*horiz,
+                -std::sin(aimPitch),
+                -std::cos(yaw)*horiz
             };
-            const Vec3 toBoss=sub(bossImage,start);
-            const float bossAlong=dot(toBoss,dir);
-            if(bossAlong>0.0f && bossAlong<=maxBeamDistance+0.05f && bossAlong<LASER_MAX_RANGE) {
-                const Vec3 closestBoss=add(start,mul(dir,bossAlong));
-                const Vec3 bossCenter={bossX,1.35f,bossZ};
-                const float bossD2=dot(sub(bossCenter,closestBoss),sub(bossCenter,closestBoss));
-                if(bossD2<3.10f) {
-                    bossHp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
-                    bossHitFlash=0.08f;
-                    if(bossHp<=0.0f) {
-                        bossHp=0.0f;
-                        bossDefeated=true;
-                        bossHitFlash=0.45f;
-
-                        // Landmark bosses are a source of named discovery,
-                        // not a respawning farm: defeating this one unlocks
-                        // another UNKNOWN EQUIPMENT piece and components.
-                        ++unknownEquipment;
-                        scrap+=5;
-                        circuits+=2;
+            const LaserTrace trace=traceLaser(start,dir);
+            float maxBeamDistance=trace.distance;
+            if(dir.y<0.0f) {
+                const float groundDistance=start.y/(-dir.y);
+                if(groundDistance>0.02f) maxBeamDistance=std::min(maxBeamDistance,groundDistance);
+            }
+    
+            const Vec3 enemyImage={
+                nearestWorldImage(enemyX,px),0.95f,nearestWorldImage(enemyZ,pz)
+            };
+            const Vec3 toEnemy=sub(enemyImage,start);
+            const float along=dot(toEnemy,dir);
+    
+            if(along>0.0f && along<=maxBeamDistance+0.05f && along<LASER_MAX_RANGE) {
+                const Vec3 closest=add(start,mul(dir,along));
+                const Vec3 enemyCenter={enemyX,0.95f,enemyZ};
+                const float d2=dot(sub(enemyCenter,closest),sub(enemyCenter,closest));
+                if(d2<1.65f) {
+                    enemyHp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
+                    enemyHitFlash=0.08f;
+                    if(enemyHp<=0.0f) {
+                        enemyHp=0.0f;
+                        enemyRespawn=2.0f;
+                        enemyHitFlash=0.35f;
                     }
                 }
             }
-        }
-
-        // Wildlife is a real part of the world, so the player's weapon can
-        // intersect it. We choose the nearest actor along the beam rather than
-        // damaging every creature the beam crosses.
-        int hitEco=-1;
-        float nearestEco=LASER_MAX_RANGE+1.0f;
-        for(int i=0;i<MAX_ECO_ACTORS;i++) {
-            if(!ecoActors[i].alive) continue;
-
-            const Vec3 ecoImage={
-                nearestWorldImage(ecoActors[i].x,px),
-                (ecoActors[i].kind==ECO_HUNTER)?0.45f:0.32f,
-                nearestWorldImage(ecoActors[i].z,pz)
-            };
-            const Vec3 toEco=sub(ecoImage,start);
-            const float alongEco=dot(toEco,dir);
-            if(alongEco<=0.0f || alongEco>maxBeamDistance+0.05f ||
-               alongEco>=nearestEco) continue;
-
-            const Vec3 closestEco=add(start,mul(dir,alongEco));
-            const float radius=(ecoActors[i].kind==ECO_HUNTER)?0.72f:0.55f;
-            const Vec3 deltaEco=sub(ecoImage,closestEco);
-            if(dot(deltaEco,deltaEco)<radius*radius) {
-                nearestEco=alongEco;
-                hitEco=i;
+    
+            if(!bossDefeated) {
+                const Vec3 bossImage={
+                    nearestWorldImage(bossX,px),1.35f,nearestWorldImage(bossZ,pz)
+                };
+                const Vec3 toBoss=sub(bossImage,start);
+                const float bossAlong=dot(toBoss,dir);
+                if(bossAlong>0.0f && bossAlong<=maxBeamDistance+0.05f && bossAlong<LASER_MAX_RANGE) {
+                    const Vec3 closestBoss=add(start,mul(dir,bossAlong));
+                    const Vec3 bossCenter={bossX,1.35f,bossZ};
+                    const float bossD2=dot(sub(bossCenter,closestBoss),sub(bossCenter,closestBoss));
+                    if(bossD2<3.10f) {
+                        bossHp-=laserDamagePerSecond()*trace.energy*dt*60.0f;
+                        bossHitFlash=0.08f;
+                        if(bossHp<=0.0f) {
+                            bossHp=0.0f;
+                            bossDefeated=true;
+                            bossHitFlash=0.45f;
+    
+                            // Landmark bosses are a source of named discovery,
+                            // not a respawning farm: defeating this one unlocks
+                            // another UNKNOWN EQUIPMENT piece and components.
+                            ++unknownEquipment;
+                            scrap+=5;
+                            circuits+=2;
+                        }
+                    }
+                }
+            }
+    
+            // Wildlife is a real part of the world, so the player's weapon can
+            // intersect it. We choose the nearest actor along the beam rather than
+            // damaging every creature the beam crosses.
+            int hitEco=-1;
+            float nearestEco=LASER_MAX_RANGE+1.0f;
+            for(int i=0;i<MAX_ECO_ACTORS;i++) {
+                if(!ecoActors[i].alive) continue;
+    
+                const Vec3 ecoImage={
+                    nearestWorldImage(ecoActors[i].x,px),
+                    (ecoActors[i].kind==ECO_HUNTER)?0.45f:0.32f,
+                    nearestWorldImage(ecoActors[i].z,pz)
+                };
+                const Vec3 toEco=sub(ecoImage,start);
+                const float alongEco=dot(toEco,dir);
+                if(alongEco<=0.0f || alongEco>maxBeamDistance+0.05f ||
+                   alongEco>=nearestEco) continue;
+    
+                const Vec3 closestEco=add(start,mul(dir,alongEco));
+                const float radius=(ecoActors[i].kind==ECO_HUNTER)?0.72f:0.55f;
+                const Vec3 deltaEco=sub(ecoImage,closestEco);
+                if(dot(deltaEco,deltaEco)<radius*radius) {
+                    nearestEco=alongEco;
+                    hitEco=i;
+                }
+            }
+    
+            if(hitEco>=0) {
+                EcoActor& animal=ecoActors[hitEco];
+                const float damage=(animal.kind==ECO_HUNTER)?20.0f:12.0f;
+                animal.hp-=damage*trace.energy*dt*60.0f;
+                animal.fear=std::min(1.0f,animal.fear+dt*3.0f);
+                animal.alert=std::min(1.0f,animal.alert+dt*2.0f);
+                if(animal.hp<=0.0f) {
+                    recordEcoEvent(6,animal.kind,animal.x,animal.z);
+                    ecoKillActor(hitEco);
+                    ecosystemLastEvent=6;
+                    ecosystemLastEventTimer=2.5f;
+                    animal.target=-1;
+                }
             }
         }
+}
 
-        if(hitEco>=0) {
-            EcoActor& animal=ecoActors[hitEco];
-            const float damage=(animal.kind==ECO_HUNTER)?20.0f:12.0f;
-            animal.hp-=damage*trace.energy*dt*60.0f;
-            animal.fear=std::min(1.0f,animal.fear+dt*3.0f);
-            animal.alert=std::min(1.0f,animal.alert+dt*2.0f);
-            if(animal.hp<=0.0f) {
-                recordEcoEvent(6,animal.kind,animal.x,animal.z);
-                ecoKillActor(hitEco);
-                ecosystemLastEvent=6;
-                ecosystemLastEventTimer=2.5f;
-                animal.target=-1;
-            }
+static void update(float dt) {
+    autosaveTimer+=dt;
+    updateProgressionTimers(dt);
+    updatePlayerSystem(dt);
+    updateWorldSystems(dt);
+    updateTransientSystems(dt);
+    resolvePlayerWeaponHits(dt);
+
+    if(!savePath.empty() && autosaveTimer>=5.0f) {
+        saveGame();
+    }
+}
+
+static void drawWorldScene(const Mat4& vp) {
+    if(features.terrain) {
+        drawProceduralTerrain(vp);
+        if(features.terrainDebug) {
+            drawChunkBorders(vp);
+            drawGrid(vp);
+        }
+    }
+
+    if(features.worldStructures) drawArenaBlocks(vp);
+    if(features.worldStructures) drawTestWorldStructures(vp);
+    if(features.weather) drawRain(vp);
+    if(features.ecosystem) drawEcosystem(vp);
+    if(features.wrecks && wreck.active) drawWreck(vp);
+    if(features.enemy && enemyRespawn<=0.0f) drawEnemy(vp);
+    if(features.boss && !bossDefeated) drawBoss(vp);
+
+    if(features.player) {
+        if(respawnTimer<=0.0f && !miniBotMode) drawMech(vp);
+        else drawMiniBot(vp);
+
+        if(features.playerCombat && respawnTimer<=0.0f && !miniBotMode) {
+            drawLaser(vp);
         }
     }
 }
@@ -3927,8 +4134,8 @@ static void frame() {
 
     glViewport(0,0,viewportW,viewportH);
 
-    const bool night=ecoIsNight(ecosystemClock);
-    const float rain=ecoRainIntensity(ecosystemClock);
+    const bool night=features.weather && ecoIsNight(ecosystemClock);
+    const float rain=features.weather ? ecoRainIntensity(ecosystemClock) : 0.0f;
     const float skyR=night?0.010f:(0.025f-0.004f*rain);
     const float skyG=night?0.016f:(0.035f-0.008f*rain);
     const float skyB=night?0.030f:(0.050f-0.010f*rain);
@@ -3939,40 +4146,37 @@ static void frame() {
     const float aspect=viewportH?float(viewportW)/float(viewportH):1.0f;
     const Mat4 proj=perspective(62.0f*PI/180.0f,aspect,0.1f,60.0f);
 
-    const Vec3 target={px,0.90f,pz};
-    const float cameraDistance=6.8f;
+    const Vec3 target={px,py+0.90f,pz};
+    const float cameraHeight=3.78f+cameraDistance*0.12f;
     const Vec3 eye={
         px-cameraDistance*std::sin(yaw),
-        4.6f,
+        py+cameraHeight,
         pz+cameraDistance*std::cos(yaw)
     };
     const Mat4 vp=mulM(proj,lookAt(eye,target,{0,1,0}));
 
-    drawProceduralTerrain(vp);
-    drawChunkBorders(vp);
-    drawGrid(vp);
-    drawArenaBlocks(vp);
-    drawTestWorldStructures(vp);
-    drawRain(vp);
-    drawEcosystem(vp);
-    if(wreck.active) drawWreck(vp);
-    if(enemyRespawn<=0.0f) drawEnemy(vp);
-    if(!bossDefeated) drawBoss(vp);
-
-    if(respawnTimer<=0.0f && !miniBotMode) {
-        drawMech(vp);
-        drawLaser(vp);
-    } else {
-        drawMiniBot(vp);
-    }
-
-    drawEnemyLaser(vp);
-    drawBossLaser(vp);
+    drawWorldScene(vp);
+    if(features.enemy) drawEnemyLaser(vp);
+    if(features.boss) drawBossLaser(vp);
     drawHud();
 }
 
+static bool pointInCameraGesture(float x,float y,float w,float h) {
+    return x>w*0.46f && x<w*0.60f && y>h*0.08f && y<h*0.34f;
+}
+
+static bool pointInJumpButton(float x,float y,float w,float h) {
+    const float cx=w*0.52f;
+    const float cy=h*0.78f;
+    const float radius=h*0.105f;
+    const float dx=x-cx, dy=y-cy;
+    return dx*dx+dy*dy<=radius*radius;
+}
+
 static void touch(int pointerId,int action,float x,float y,float w,float h) {
-    const bool leftZone = x < w*0.45f;
+    if(!features.player) return;
+
+    const bool leftZone=x<w*0.45f;
 
     if(action==ACTION_DOWN || action==ACTION_POINTER_DOWN) {
         if(!leftZone && pointInMapButton(x,y,w,h) && mapPointer<0) {
@@ -3982,25 +4186,33 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
         }
 
         if(mapExpanded) return;
-        if(leftZone && movePointer<0) {
+
+        if(!leftZone && pointInCameraGesture(x,y,w,h) && cameraPointer<0) {
+            cameraPointer=pointerId;
+            lastCameraY=y;
+        } else if(!leftZone && pointInJumpButton(x,y,w,h) && jumpPointer<0) {
+            jumpPointer=pointerId;
+            jumpRequested=true;
+        } else if(leftZone && movePointer<0) {
             movePointer=pointerId;
             const float baseX=w*0.18f;
             const float baseY=h*0.78f;
             const float radius=h*0.20f;
             joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
-        } else if(!leftZone && pointInSwapButton(x,y,w,h) && swapPointer<0) {
+        } else if(features.worldStructures && !leftZone &&
+                   pointInSwapButton(x,y,w,h) && swapPointer<0) {
             swapPointer=pointerId;
             performBodySwap();
-        } else if(!leftZone && pointInActionButton(x,y,w,h) && actionPointer<0) {
+        } else if(features.worldStructures && !leftZone &&
+                   pointInActionButton(x,y,w,h) && actionPointer<0) {
             actionPointer=pointerId;
             actionPointerActive=performContextAction();
-        } else if(!leftZone && pointInFireButton(x,y,w,h) && firePointer<0) {
-            // Only a press inside the explicit FIRE button starts firing.
+        } else if(features.playerCombat && !leftZone &&
+                   pointInFireButton(x,y,w,h) && firePointer<0) {
             firePointer=pointerId;
             laserT=0.08f;
-        } else if(!leftZone && aimPointer<0) {
-            // Any other press on the right is an aim swipe, never a fire press.
+        } else if(features.playerCombat && !leftZone && aimPointer<0) {
             aimPointer=pointerId;
             lastAimX=x;
             lastAimY=y;
@@ -4015,28 +4227,25 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             const float radius=h*0.20f;
             joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
+        } else if(pointerId==cameraPointer) {
+            const float dy=y-lastCameraY;
+            cameraDistance=std::clamp(cameraDistance+dy*0.018f,
+                                       CAMERA_DISTANCE_MIN,CAMERA_DISTANCE_MAX);
+            lastCameraY=y;
         } else if(pointerId==aimPointer) {
             updateAim(x,y);
-        } else if(pointerId!=firePointer && pointerId!=actionPointer && pointerId!=swapPointer && !leftZone) {
-            // An unclaimed right-side MOVE can become an aim gesture, but a
-            // dedicated action/fire pointer never changes role mid-gesture.
-            if(pointInFireButton(x,y,w,h) && firePointer<0) {
-                firePointer=pointerId;
-            } else if(pointInActionButton(x,y,w,h) && actionPointer<0) {
-                actionPointer=pointerId;
-            } else if(aimPointer<0) {
-                aimPointer=pointerId;
-                lastAimX=x;
-                lastAimY=y;
-            }
         }
         return;
     }
 
     if(action==ACTION_UP || action==ACTION_POINTER_UP || action==ACTION_CANCEL) {
-        if(pointerId==mapPointer || action==ACTION_CANCEL) {
-            mapPointer=-1;
+        if(pointerId==mapPointer || action==ACTION_CANCEL) mapPointer=-1;
+        if(pointerId==cameraPointer || action==ACTION_CANCEL) {
+            cameraPointer=-1;
+            lastCameraY=0.0f;
         }
+        if(pointerId==jumpPointer || action==ACTION_CANCEL) jumpPointer=-1;
+
         if(mapExpanded && action!=ACTION_CANCEL) return;
 
         if(pointerId==movePointer || action==ACTION_CANCEL) {
@@ -4044,16 +4253,12 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             joyX=0.0f;
             joyY=0.0f;
         }
-        if(pointerId==aimPointer || action==ACTION_CANCEL) {
-            aimPointer=-1;
-        }
+        if(pointerId==aimPointer || action==ACTION_CANCEL) aimPointer=-1;
         if(pointerId==actionPointer || action==ACTION_CANCEL) {
             actionPointer=-1;
             actionPointerActive=false;
         }
-        if(pointerId==swapPointer || action==ACTION_CANCEL) {
-            swapPointer=-1;
-        }
+        if(pointerId==swapPointer || action==ACTION_CANCEL) swapPointer=-1;
         if(pointerId==firePointer || action==ACTION_CANCEL) {
             firePointer=-1;
             laserT=0.0f;
