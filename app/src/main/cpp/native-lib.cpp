@@ -11,6 +11,7 @@
 #include <cstring>
 #include <type_traits>
 #include <memory>
+#include <mutex>
 
 namespace dg {
 
@@ -167,6 +168,8 @@ struct FeatureFlags {
     bool bodySystem=false;
     bool salvage=false;
     bool equipment=false;
+    bool summonedNpcs=false;
+    bool summonedBosses=false;
 
     // UI / SYSTEM
     bool navigationHud=false;
@@ -224,6 +227,8 @@ static constexpr FeatureDefinition FEATURE_DEFS[] = {
 
     {"COMBAT",  ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::playerCombat},
     {"BODY",    ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::bodySystem},
+    {"NPCS",    ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_NONE, &FeatureFlags::summonedNpcs},
+    {"BOSSES+", ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_NONE, &FeatureFlags::summonedBosses},
     {"SALVAGE", ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::salvage},
     {"GEAR",    ADMIN_GROUP_GAMEPLAY, ADMIN_EFFECT_INFO, ADMIN_ANCHOR_NONE, &FeatureFlags::equipment},
 
@@ -260,6 +265,8 @@ static void configurePrototypeFeatures() {
     features.bodySystem=false;
     features.salvage=false;
     features.equipment=false;
+    features.summonedNpcs=false;
+    features.summonedBosses=false;
 
     features.navigationHud=false;
     features.progressionHud=false;
@@ -433,6 +440,76 @@ static bool proceduralSolidAt(float x,float z) {
     return proceduralSolidTile(tx,tz);
 }
 
+enum SummonKind : uint8_t {
+    SUMMON_NPC_SURVIVOR=0,
+    SUMMON_NPC_MECHANIC,
+    SUMMON_NPC_SCIENTIST,
+    SUMMON_NPC_TRADER,
+    SUMMON_NPC_SCOUT,
+    SUMMON_NPC_MEDIC,
+    SUMMON_NPC_RANGER,
+    SUMMON_BOSS_SAMURAI,
+    SUMMON_BOSS_TYRANT,
+    SUMMON_BOSS_DREADNOUGHT,
+    SUMMON_BOSS_RAPTOR,
+    SUMMON_BOSS_BEHEMOTH,
+    SUMMON_BOSS_SENTINEL
+};
+
+struct SummonedEntity {
+    bool active=false;
+    int kind=SUMMON_NPC_SURVIVOR;
+    int id=0;
+    float x=0.0f,z=0.0f;
+    float homeX=0.0f,homeZ=0.0f;
+    float yaw=0.0f;
+    float hp=100.0f,maxHp=100.0f;
+    float thinkTimer=0.0f,actionTimer=0.0f,lifetime=0.0f;
+    uint32_t seed=0;
+};
+
+static constexpr int MAX_SUMMONED_ENTITIES=32;
+static SummonedEntity summonedEntities[MAX_SUMMONED_ENTITIES]{};
+static int nextSummonedId=1;
+
+static bool summonKindIsBoss(int kind){ return kind>=SUMMON_BOSS_SAMURAI; }
+
+static const char* summonKindName(int kind){
+    switch(kind){
+        case SUMMON_NPC_SURVIVOR:return "survivor";
+        case SUMMON_NPC_MECHANIC:return "mechanic";
+        case SUMMON_NPC_SCIENTIST:return "scientist";
+        case SUMMON_NPC_TRADER:return "trader";
+        case SUMMON_NPC_SCOUT:return "scout";
+        case SUMMON_NPC_MEDIC:return "medic";
+        case SUMMON_NPC_RANGER:return "ranger";
+        case SUMMON_BOSS_SAMURAI:return "samurai";
+        case SUMMON_BOSS_TYRANT:return "tyrant";
+        case SUMMON_BOSS_DREADNOUGHT:return "dreadnought";
+        case SUMMON_BOSS_RAPTOR:return "raptor";
+        case SUMMON_BOSS_BEHEMOTH:return "behemoth";
+        case SUMMON_BOSS_SENTINEL:return "sentinel";
+        default:return "unknown";
+    }
+}
+
+static int commandEntityKind(const std::string& token){
+    if(token=="survivor"||token=="settler")return SUMMON_NPC_SURVIVOR;
+    if(token=="mechanic"||token=="engineer")return SUMMON_NPC_MECHANIC;
+    if(token=="scientist"||token=="researcher")return SUMMON_NPC_SCIENTIST;
+    if(token=="trader"||token=="merchant")return SUMMON_NPC_TRADER;
+    if(token=="scout")return SUMMON_NPC_SCOUT;
+    if(token=="medic"||token=="doctor")return SUMMON_NPC_MEDIC;
+    if(token=="ranger")return SUMMON_NPC_RANGER;
+    if(token=="samurai")return SUMMON_BOSS_SAMURAI;
+    if(token=="tyrant")return SUMMON_BOSS_TYRANT;
+    if(token=="dreadnought"||token=="dread")return SUMMON_BOSS_DREADNOUGHT;
+    if(token=="raptor"||token=="rex")return SUMMON_BOSS_RAPTOR;
+    if(token=="behemoth")return SUMMON_BOSS_BEHEMOTH;
+    if(token=="sentinel")return SUMMON_BOSS_SENTINEL;
+    return -1;
+}
+
 static float heat=0.0f;
 static float playerHp=100.0f;
 static float respawnTimer=0.0f;
@@ -538,6 +615,10 @@ static bool mapExpanded=false;
 
 static int adminPointer=-1;
 static bool adminOpen=false;
+static bool commandOpenRequested=false;
+static std::mutex commandMutex;
+static std::string pendingAdminCommand;
+static std::string commandLastResult;
 static float adminToastTimer=0.0f;
 static int adminToastFeature=-1;
 static bool adminToastEnabled=false;
