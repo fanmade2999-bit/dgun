@@ -749,6 +749,7 @@ static double nowSeconds() {
 static void initializeBodyPool();
 static void initializeEcosystem();
 static void refreshEcoChunkActivePopulation();
+static void resetPlayerInput();
 static bool beginFabrication();
 static int countReadyBodies();
 static int findOtherBodySlot();
@@ -756,6 +757,7 @@ static void saveActiveBodyToPool();
 static void loadBodyFromSlot(int slot);
 static bool saveGame();
 static bool loadGame();
+static void updateSummonedEntities(float dt);
 
 
 static GLuint compileShader(GLenum type, const char* src) {
