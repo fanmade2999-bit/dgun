@@ -6,6 +6,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <string>
+#include <vector>
+#include <fstream>
+#include <cstring>
+#include <type_traits>
+#include <memory>
 
 namespace dg {
 
@@ -221,6 +226,10 @@ struct EcoChunkState {
     // This lets the 1024x1024 world contain a much larger living population
     // without making every creature a full real-time object.
     uint16_t dormant[3]{};
+
+    // Fractional progress keeps aggregate births/deaths from being rounded
+    // away on every 0.20s simulation tick.
+    float dormantRemainder[3]{};
 };
 
 static EcoChunkState ecoChunks[WORLD_CHUNK_STATE_COUNT]{};
@@ -495,7 +504,7 @@ static double lastTime=0.0;
 static std::string savePath;
 static float autosaveTimer=0.0f;
 static constexpr uint32_t SAVE_MAGIC=0x44475356u;
-static constexpr uint32_t SAVE_VERSION=2u;
+static constexpr uint32_t SAVE_VERSION=3u;
 
 static double nowSeconds() {
     static double t=0.0;
@@ -953,6 +962,7 @@ static void initializeEcosystem() {
         chunk.dormant[ECO_GRAZER]=2+int((h>>3)&3u);
         chunk.dormant[ECO_SCAVENGER]=1+int((h>>8)&2u);
         chunk.dormant[ECO_HUNTER]=int((h>>13)&1u);
+        for(int kind=0;kind<3;kind++) chunk.dormantRemainder[kind]=0.0f;
     }
 
     for(int i=0;i<MAX_ECO_ACTORS;i++) ecoActors[i]=EcoActor{};
@@ -1011,35 +1021,70 @@ static int ecoDormantCapacity(int kind,const EcoChunkState& chunk) {
 }
 
 static void ecoSimulateDormantPopulation(float dt) {
-    // This is deliberately aggregate rather than actor-by-actor. It models
-    // births, starvation and pressure in chunks the player cannot currently
-    // see, while active actors continue to use the detailed simulation.
+    // Aggregate ecology runs in chunks that have no detailed actors. A small
+    // fractional accumulator is retained so population change is not lost
+    // every time the 0.20s simulation tick rounds to an integer.
     for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) {
         EcoChunkState& chunk=ecoChunks[i];
+
+        const int dormantGrazers=int(chunk.dormant[ECO_GRAZER]);
+        const int dormantScavengers=int(chunk.dormant[ECO_SCAVENGER]);
+        const int dormantHunters=int(chunk.dormant[ECO_HUNTER]);
 
         const float quality=std::clamp(
             chunk.food*0.62f+chunk.water*0.28f+chunk.shelter*0.10f-
             chunk.danger*0.45f,0.0f,1.0f);
 
-        const float birthPulse=dt*(0.004f+quality*0.012f);
-        const float deathPulse=dt*(0.002f+(1.0f-quality)*0.018f);
+        // Distant grazers consume the same finite chunk resources as active
+        // grazers, so a forgotten region can genuinely be overgrazed.
+        const float grazingPressure=float(dormantGrazers)*dt*0.00024f;
+        chunk.food=std::max(0.0f,chunk.food-grazingPressure);
+
+        // Distant hunters still form a food chain. Their pressure is applied
+        // to aggregate grazer/scavenger populations instead of creating fake
+        // off-screen actors.
+        const float predatorPressure=float(dormantHunters)*dt*0.0085f;
 
         for(int kind=0;kind<3;kind++) {
             const int cap=ecoDormantCapacity(kind,chunk);
-            float value=float(chunk.dormant[kind]);
-            if(value<cap) value=std::min(float(cap),value+birthPulse);
-            if(value>cap) value=std::max(float(cap),value-deathPulse);
+            float value=float(chunk.dormant[kind])+chunk.dormantRemainder[kind];
 
-            // Severe ecological failure can remove dormant population faster.
-            if(chunk.food<0.08f && kind==ECO_GRAZER)
-                value=std::max(0.0f,value-dt*0.08f);
-            if(chunk.water<0.05f)
-                value=std::max(0.0f,value-dt*0.035f);
-            if(chunk.danger>0.55f && kind==ECO_HUNTER)
-                value=std::max(0.0f,value-dt*0.018f);
+            float birthRate=0.0045f+quality*0.015f;
+            float deathRate=0.0035f+(1.0f-quality)*0.022f;
 
-            chunk.dormant[kind]=uint16_t(std::clamp(
-                int(std::round(value)),0,cap));
+            if(kind==ECO_SCAVENGER) {
+                // Scavengers benefit slightly from overall organic activity,
+                // but too much danger still suppresses their recovery.
+                birthRate+=std::min(0.006f,chunk.food*0.004f);
+            }
+            if(kind==ECO_HUNTER) {
+                // Hunters need prey density; barren chunks slowly lose them.
+                const float prey=float(dormantGrazers+dormantScavengers);
+                birthRate*=std::clamp(prey/6.0f,0.25f,1.0f);
+                deathRate+=std::max(0.0f,0.35f-prey*0.015f)*0.020f;
+            }
+
+            float delta=dt*(birthRate-deathRate);
+
+            if(kind==ECO_GRAZER) {
+                delta-=predatorPressure*0.78f;
+                if(chunk.food<0.08f) {
+                    delta-=dt*0.055f;
+                }
+            } else if(kind==ECO_SCAVENGER) {
+                delta-=predatorPressure*0.22f;
+                if(chunk.water<0.05f) {
+                    delta-=dt*0.028f;
+                }
+            } else if(kind==ECO_HUNTER && chunk.danger>0.55f) {
+                delta-=dt*0.020f;
+            }
+
+            value=std::clamp(value+delta,0.0f,float(cap));
+            const int next=int(std::floor(value));
+            chunk.dormant[kind]=uint16_t(std::clamp(next,0,cap));
+            chunk.dormantRemainder[kind]=std::clamp(
+                value-float(chunk.dormant[kind]),0.0f,0.9999f);
         }
     }
 }
@@ -1616,6 +1661,11 @@ static void simulateEcosystemTick(float dt) {
             ecoReproduce(i,mate);
         }
     }
+
+    // LOD transitions happen before detailed actor logic, so the active
+    // population can drift this tick. Refresh the chunk counters afterward
+    // for accurate HUD/minimap reporting.
+    refreshEcoChunkActivePopulation();
 }
 
 static void updateEcosystem(float dt) {
@@ -1637,6 +1687,39 @@ static int ecosystemChunkPopulation(int cx,int cz) {
         if(chunkCoord(ecoActors[i].x)==cx && chunkCoord(ecoActors[i].z)==cz) count++;
     }
     return count;
+}
+
+static int ecoChunkTotalPopulation(int cx,int cz) {
+    const EcoChunkState& chunk=ecoChunks[chunkStateIndex(cx,cz)];
+    return ecosystemChunkPopulation(cx,cz)
+        + int(chunk.dormant[ECO_GRAZER])
+        + int(chunk.dormant[ECO_SCAVENGER])
+        + int(chunk.dormant[ECO_HUNTER]);
+}
+
+static int ecoDormantTotalPopulation() {
+    int total=0;
+    for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) {
+        const EcoChunkState& chunk=ecoChunks[i];
+        total+=int(chunk.dormant[ECO_GRAZER]);
+        total+=int(chunk.dormant[ECO_SCAVENGER]);
+        total+=int(chunk.dormant[ECO_HUNTER]);
+    }
+    return total;
+}
+
+static int ecoTotalPopulation() {
+    return ecosystemPopulation+ecoDormantTotalPopulation();
+}
+
+static void refreshEcoChunkActivePopulation() {
+    for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) {
+        ecoChunks[i].population=0;
+    }
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        if(!ecoActors[i].alive) continue;
+        ecoChunks[chunkStateIndex(chunkCoord(ecoActors[i].x),chunkCoord(ecoActors[i].z))].population++;
+    }
 }
 
 static void drawEcosystem(const Mat4& vp) {
@@ -2255,9 +2338,9 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
                 const int cx=centerX+mx-visible/2;
                 const int cz=centerZ+mz-visible/2;
                 const uint32_t h=chunkHash(cx,cz);
-                const int population=ecosystemChunkPopulation(cx,cz);
+                const int population=ecoChunkTotalPopulation(cx,cz);
                 const bool industrial=chunkBiomeIsIndustrial(cx,cz);
-                const float life=std::clamp(float(population)/5.0f,0.0f,1.0f);
+                const float life=std::clamp(float(population)/18.0f,0.0f,1.0f);
                 const float r=industrial?(0.38f+life*0.10f):(0.09f+0.03f*float((h>>3)&3u)+life*0.10f);
                 const float g=industrial?(0.25f+life*0.18f):(0.16f+0.025f*float((h>>6)&3u)+life*0.18f);
                 const float b=industrial?(0.15f+life*0.08f):(0.20f+0.03f*float((h>>9)&3u)+life*0.08f);
@@ -2298,9 +2381,9 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
             const int signedX=mx-(chunkCount/2);
             const int signedZ=mz-(chunkCount/2);
             const uint32_t h=chunkHash(signedX,signedZ);
-            const int population=ecosystemChunkPopulation(signedX,signedZ);
+            const int population=ecoChunkTotalPopulation(signedX,signedZ);
             const bool industrial=chunkBiomeIsIndustrial(signedX,signedZ);
-            const float life=std::clamp(float(population)/6.0f,0.0f,1.0f);
+            const float life=std::clamp(float(population)/18.0f,0.0f,1.0f);
             const float r=industrial?(0.40f+life*0.08f):(0.07f+0.025f*float((h>>3)&3u)+life*0.10f);
             const float g=industrial?(0.24f+life*0.16f):(0.12f+0.024f*float((h>>6)&3u)+life*0.18f);
             const float b=industrial?(0.14f+life*0.08f):(0.18f+0.028f*float((h>>9)&3u)+life*0.08f);
@@ -2561,7 +2644,8 @@ static void drawHud() {
                0.64f,0.80f,0.88f,0.78f);
 
     char ecoText[32]{};
-    std::snprintf(ecoText,sizeof(ecoText),"ECO%d",ecosystemPopulation);
+    std::snprintf(ecoText,sizeof(ecoText),"ECO%d/%d",
+                  ecosystemPopulation,ecoTotalPopulation());
     drawText2D(hud,ecoText,viewportW*0.30f,viewportH*0.90f,2.15f,
                0.54f,0.76f,0.68f,0.80f);
 
@@ -2596,8 +2680,10 @@ static void drawHud() {
     // The HUD exposes local ecology, not a player-centric quest state.
     char localEcoText[32]{};
     const EcoChunkState& localChunk=ecoChunkAt(px,pz);
-    std::snprintf(localEcoText,sizeof(localEcoText),"E%d F%d W%d",
+    const int localTotal=ecoChunkTotalPopulation(chunkCoord(px),chunkCoord(pz));
+    std::snprintf(localEcoText,sizeof(localEcoText),"E%d/%d F%d W%d",
                   localChunk.population,
+                  localTotal,
                   int(std::round(localChunk.food*9.0f)),
                   int(std::round(localChunk.water*9.0f)));
     drawText2D(hud,localEcoText,viewportW*0.75f,viewportH*0.935f,1.85f,
@@ -2846,6 +2932,566 @@ static void beginPlayerDeath() {
     firePointer=-1;
     aimPointer=-1;
     actionPointer=-1;
+}
+
+
+struct SaveSnapshot {
+    float px=0.0f, pz=0.0f, yaw=0.0f, aimPitch=0.18f;
+    float heat=0.0f, playerHp=100.0f, respawnTimer=0.0f, chassisIntegrity=100.0f;
+    BodyPartState playerParts[PART_COUNT]{};
+
+    StoredBody bodySlots[MAX_BODY_SLOTS]{};
+    int activeBodySlot=0;
+    int bodyGeneration=1;
+    uint8_t bodyPoolInitialized=0;
+    uint8_t miniBotMode=0;
+
+    int scrap=0, circuits=0, unknownEquipment=0, identifiedEquipment=0;
+    int laserEquipmentLevel=0;
+    uint8_t laserLanceEquipped=0;
+
+    float fabricationTimer=0.0f;
+    int fabricationSlot=-1;
+    uint8_t baseMode=0;
+
+    WreckState wreck{};
+
+    float enemyX=0.0f, enemyZ=0.0f, enemyYaw=0.0f;
+    float enemyHp=40.0f, enemyRespawn=0.0f, enemyAttackTimer=0.7f;
+
+    float bossX=0.0f, bossZ=0.0f, bossYaw=0.0f;
+    float bossHp=180.0f, bossAttackTimer=2.0f, bossLaserT=0.0f;
+    float bossShotDirX=0.0f, bossShotDirZ=0.0f, bossHitFlash=0.0f;
+    uint8_t bossDefeated=0;
+
+    float ecosystemClock=0.0f, ecosystemAccumulator=0.0f;
+    int ecosystemPopulation=0;
+    int ecosystemBirths=0, ecosystemDeaths=0, ecosystemKills=0;
+    int ecosystemLastEvent=0;
+    float ecosystemLastEventTimer=0.0f;
+    int ecosystemCycle=0;
+    float worldNoise=0.0f;
+
+    EcoEventRecord ecoEventHistory[ECO_EVENT_HISTORY]{};
+    int ecoEventWrite=0;
+
+    EcoChunkState ecoChunks[WORLD_CHUNK_STATE_COUNT]{};
+    EcoActor ecoActors[MAX_ECO_ACTORS]{};
+};
+
+static std::string saveFilePath() {
+    if(savePath.empty()) return {};
+    if(savePath.back()=='/') return savePath+"dgun_save.bin";
+    return savePath+"/dgun_save.bin";
+}
+
+static uint32_t saveChecksum(const std::vector<uint8_t>& data) {
+    uint32_t h=2166136261u;
+    for(uint8_t b:data) {
+        h^=b;
+        h*=16777619u;
+    }
+    return h;
+}
+
+template<typename T>
+static void savePod(std::vector<uint8_t>& data,const T& value) {
+    static_assert(std::is_trivially_copyable<T>::value,"savePod requires POD");
+    const size_t oldSize=data.size();
+    data.resize(oldSize+sizeof(T));
+    std::memcpy(data.data()+oldSize,&value,sizeof(T));
+}
+
+static void saveBool(std::vector<uint8_t>& data,bool value) {
+    const uint8_t v=value?1u:0u;
+    savePod(data,v);
+}
+
+template<typename T>
+static bool loadPod(const std::vector<uint8_t>& data,size_t& cursor,T& value) {
+    static_assert(std::is_trivially_copyable<T>::value,"loadPod requires POD");
+    if(cursor>data.size() || data.size()-cursor<sizeof(T)) return false;
+    std::memcpy(&value,data.data()+cursor,sizeof(T));
+    cursor+=sizeof(T);
+    return true;
+}
+
+static bool loadBool(const std::vector<uint8_t>& data,size_t& cursor,uint8_t& value) {
+    return loadPod(data,cursor,value);
+}
+
+static void writeBodyPart(std::vector<uint8_t>& data,const BodyPartState& part) {
+    savePod(data,part.hp);
+    savePod(data,part.maxHp);
+}
+
+static bool readBodyPart(const std::vector<uint8_t>& data,size_t& cursor,BodyPartState& part) {
+    return loadPod(data,cursor,part.hp) &&
+           loadPod(data,cursor,part.maxHp);
+}
+
+static void writeStoredBody(std::vector<uint8_t>& data,const StoredBody& body) {
+    saveBool(data,body.occupied);
+    savePod(data,body.generation);
+    for(int i=0;i<PART_COUNT;i++) writeBodyPart(data,body.parts[i]);
+}
+
+static bool readStoredBody(const std::vector<uint8_t>& data,size_t& cursor,StoredBody& body) {
+    uint8_t occupied=0;
+    if(!loadBool(data,cursor,occupied) ||
+       !loadPod(data,cursor,body.generation)) return false;
+    body.occupied=occupied!=0;
+    for(int i=0;i<PART_COUNT;i++) {
+        if(!readBodyPart(data,cursor,body.parts[i])) return false;
+    }
+    return true;
+}
+
+static void writeWreck(std::vector<uint8_t>& data,const WreckState& value) {
+    saveBool(data,value.active);
+    savePod(data,value.x);
+    savePod(data,value.z);
+    savePod(data,value.yaw);
+    savePod(data,value.salvagePercent);
+    for(int i=0;i<PART_COUNT;i++) writeBodyPart(data,value.parts[i]);
+}
+
+static bool readWreck(const std::vector<uint8_t>& data,size_t& cursor,WreckState& value) {
+    uint8_t active=0;
+    if(!loadBool(data,cursor,active) ||
+       !loadPod(data,cursor,value.x) ||
+       !loadPod(data,cursor,value.z) ||
+       !loadPod(data,cursor,value.yaw) ||
+       !loadPod(data,cursor,value.salvagePercent)) return false;
+    value.active=active!=0;
+    for(int i=0;i<PART_COUNT;i++) {
+        if(!readBodyPart(data,cursor,value.parts[i])) return false;
+    }
+    return true;
+}
+
+static void writeEcoActor(std::vector<uint8_t>& data,const EcoActor& actor) {
+    saveBool(data,actor.alive);
+    savePod(data,actor.kind);
+    savePod(data,actor.groupId);
+    savePod(data,actor.x);
+    savePod(data,actor.z);
+    savePod(data,actor.yaw);
+    savePod(data,actor.hp);
+    savePod(data,actor.hunger);
+    savePod(data,actor.energy);
+    savePod(data,actor.age);
+    savePod(data,actor.breedCooldown);
+    savePod(data,actor.brain);
+    savePod(data,actor.corpseTimer);
+    savePod(data,actor.fear);
+    savePod(data,actor.thirst);
+    savePod(data,actor.alert);
+    savePod(data,actor.loyalty);
+    savePod(data,actor.attackCooldown);
+    savePod(data,actor.denX);
+    savePod(data,actor.denZ);
+    savePod(data,actor.lastPlayerChunkX);
+    savePod(data,actor.lastPlayerChunkZ);
+    savePod(data,actor.target);
+    savePod(data,actor.homeChunkX);
+    savePod(data,actor.homeChunkZ);
+    savePod(data,actor.seed);
+}
+
+static bool readEcoActor(const std::vector<uint8_t>& data,size_t& cursor,EcoActor& actor) {
+    uint8_t alive=0;
+    if(!loadBool(data,cursor,alive) ||
+       !loadPod(data,cursor,actor.kind) ||
+       !loadPod(data,cursor,actor.groupId) ||
+       !loadPod(data,cursor,actor.x) ||
+       !loadPod(data,cursor,actor.z) ||
+       !loadPod(data,cursor,actor.yaw) ||
+       !loadPod(data,cursor,actor.hp) ||
+       !loadPod(data,cursor,actor.hunger) ||
+       !loadPod(data,cursor,actor.energy) ||
+       !loadPod(data,cursor,actor.age) ||
+       !loadPod(data,cursor,actor.breedCooldown) ||
+       !loadPod(data,cursor,actor.brain) ||
+       !loadPod(data,cursor,actor.corpseTimer) ||
+       !loadPod(data,cursor,actor.fear) ||
+       !loadPod(data,cursor,actor.thirst) ||
+       !loadPod(data,cursor,actor.alert) ||
+       !loadPod(data,cursor,actor.loyalty) ||
+       !loadPod(data,cursor,actor.attackCooldown) ||
+       !loadPod(data,cursor,actor.denX) ||
+       !loadPod(data,cursor,actor.denZ) ||
+       !loadPod(data,cursor,actor.lastPlayerChunkX) ||
+       !loadPod(data,cursor,actor.lastPlayerChunkZ) ||
+       !loadPod(data,cursor,actor.target) ||
+       !loadPod(data,cursor,actor.homeChunkX) ||
+       !loadPod(data,cursor,actor.homeChunkZ) ||
+       !loadPod(data,cursor,actor.seed)) return false;
+    actor.alive=alive!=0;
+    return true;
+}
+
+static void writeEcoChunk(std::vector<uint8_t>& data,const EcoChunkState& chunk) {
+    savePod(data,chunk.food);
+    savePod(data,chunk.water);
+    savePod(data,chunk.shelter);
+    savePod(data,chunk.danger);
+    savePod(data,chunk.population);
+    for(int kind=0;kind<3;kind++) savePod(data,chunk.dormant[kind]);
+    for(int kind=0;kind<3;kind++) savePod(data,chunk.dormantRemainder[kind]);
+}
+
+static bool readEcoChunk(const std::vector<uint8_t>& data,size_t& cursor,EcoChunkState& chunk) {
+    if(!loadPod(data,cursor,chunk.food) ||
+       !loadPod(data,cursor,chunk.water) ||
+       !loadPod(data,cursor,chunk.shelter) ||
+       !loadPod(data,cursor,chunk.danger) ||
+       !loadPod(data,cursor,chunk.population)) return false;
+    for(int kind=0;kind<3;kind++) {
+        if(!loadPod(data,cursor,chunk.dormant[kind])) return false;
+    }
+    for(int kind=0;kind<3;kind++) {
+        if(!loadPod(data,cursor,chunk.dormantRemainder[kind])) return false;
+    }
+    return true;
+}
+
+static void writeEcoEvent(std::vector<uint8_t>& data,const EcoEventRecord& event) {
+    savePod(data,event.type);
+    savePod(data,event.kind);
+    savePod(data,event.chunkX);
+    savePod(data,event.chunkZ);
+    savePod(data,event.stamp);
+}
+
+static bool readEcoEvent(const std::vector<uint8_t>& data,size_t& cursor,EcoEventRecord& event) {
+    return loadPod(data,cursor,event.type) &&
+           loadPod(data,cursor,event.kind) &&
+           loadPod(data,cursor,event.chunkX) &&
+           loadPod(data,cursor,event.chunkZ) &&
+           loadPod(data,cursor,event.stamp);
+}
+
+static bool saveGame() {
+    const std::string path=saveFilePath();
+    if(path.empty()) return false;
+
+    std::vector<uint8_t> payload;
+    payload.reserve(128*1024);
+
+    savePod(payload,px);
+    savePod(payload,pz);
+    savePod(payload,yaw);
+    savePod(payload,aimPitch);
+    savePod(payload,heat);
+    savePod(payload,playerHp);
+    savePod(payload,respawnTimer);
+    savePod(payload,chassisIntegrity);
+
+    for(int i=0;i<PART_COUNT;i++) writeBodyPart(payload,playerParts[i]);
+
+    for(int i=0;i<MAX_BODY_SLOTS;i++) writeStoredBody(payload,bodySlots[i]);
+    savePod(payload,activeBodySlot);
+    savePod(payload,bodyGeneration);
+    saveBool(payload,bodyPoolInitialized);
+    saveBool(payload,miniBotMode);
+
+    savePod(payload,scrap);
+    savePod(payload,circuits);
+    savePod(payload,unknownEquipment);
+    savePod(payload,identifiedEquipment);
+    savePod(payload,laserEquipmentLevel);
+    saveBool(payload,laserLanceEquipped);
+
+    savePod(payload,fabricationTimer);
+    savePod(payload,fabricationSlot);
+    const uint8_t baseModeValue=baseMode==BaseMode::ORBITAL?1u:0u;
+    savePod(payload,baseModeValue);
+
+    writeWreck(payload,wreck);
+
+    savePod(payload,enemyX);
+    savePod(payload,enemyZ);
+    savePod(payload,enemyYaw);
+    savePod(payload,enemyHp);
+    savePod(payload,enemyRespawn);
+    savePod(payload,enemyAttackTimer);
+
+    savePod(payload,bossX);
+    savePod(payload,bossZ);
+    savePod(payload,bossYaw);
+    savePod(payload,bossHp);
+    savePod(payload,bossAttackTimer);
+    savePod(payload,bossLaserT);
+    savePod(payload,bossShotDirX);
+    savePod(payload,bossShotDirZ);
+    savePod(payload,bossHitFlash);
+    saveBool(payload,bossDefeated);
+
+    savePod(payload,ecosystemClock);
+    savePod(payload,ecosystemAccumulator);
+    savePod(payload,ecosystemPopulation);
+    savePod(payload,ecosystemBirths);
+    savePod(payload,ecosystemDeaths);
+    savePod(payload,ecosystemKills);
+    savePod(payload,ecosystemLastEvent);
+    savePod(payload,ecosystemLastEventTimer);
+    savePod(payload,ecosystemCycle);
+    savePod(payload,worldNoise);
+
+    savePod(payload,ecoEventWrite);
+    for(int i=0;i<ECO_EVENT_HISTORY;i++) writeEcoEvent(payload,ecoEventHistory[i]);
+
+    for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) writeEcoChunk(payload,ecoChunks[i]);
+    for(int i=0;i<MAX_ECO_ACTORS;i++) writeEcoActor(payload,ecoActors[i]);
+
+    const uint32_t checksum=saveChecksum(payload);
+    const uint32_t payloadSize=uint32_t(payload.size());
+
+    std::ofstream out(path+".tmp",std::ios::binary|std::ios::trunc);
+    if(!out) {
+        __android_log_print(ANDROID_LOG_ERROR,"DG-0016",
+                            "Unable to open save temp file: %s",path.c_str());
+        return false;
+    }
+
+    out.write(reinterpret_cast<const char*>(&SAVE_MAGIC),sizeof(SAVE_MAGIC));
+    out.write(reinterpret_cast<const char*>(&SAVE_VERSION),sizeof(SAVE_VERSION));
+    out.write(reinterpret_cast<const char*>(&payloadSize),sizeof(payloadSize));
+    out.write(reinterpret_cast<const char*>(&checksum),sizeof(checksum));
+    out.write(reinterpret_cast<const char*>(payload.data()),
+              std::streamsize(payload.size()));
+    out.flush();
+    if(!out) {
+        out.close();
+        std::remove((path+".tmp").c_str());
+        return false;
+    }
+    out.close();
+
+    std::remove(path.c_str());
+    if(std::rename((path+".tmp").c_str(),path.c_str())!=0) {
+        std::remove((path+".tmp").c_str());
+        return false;
+    }
+
+    autosaveTimer=0.0f;
+    return true;
+}
+
+static bool loadGame() {
+    const std::string path=saveFilePath();
+    if(path.empty()) return false;
+
+    std::ifstream in(path,std::ios::binary|std::ios::ate);
+    if(!in) return false;
+
+    const std::streamoff fileSize=in.tellg();
+    constexpr std::streamoff HEADER_SIZE=16;
+    if(fileSize<HEADER_SIZE || fileSize>8*1024*1024) return false;
+
+    in.seekg(0,std::ios::beg);
+    uint32_t magic=0,version=0,payloadSize=0,checksum=0;
+    in.read(reinterpret_cast<char*>(&magic),sizeof(magic));
+    in.read(reinterpret_cast<char*>(&version),sizeof(version));
+    in.read(reinterpret_cast<char*>(&payloadSize),sizeof(payloadSize));
+    in.read(reinterpret_cast<char*>(&checksum),sizeof(checksum));
+
+    if(!in || magic!=SAVE_MAGIC || version!=SAVE_VERSION ||
+       payloadSize!=uint32_t(fileSize-HEADER_SIZE)) {
+        __android_log_print(ANDROID_LOG_WARN,"DG-0016",
+                            "Ignoring incompatible or truncated save");
+        return false;
+    }
+
+    std::vector<uint8_t> payload(payloadSize);
+    if(payloadSize>0) {
+        in.read(reinterpret_cast<char*>(payload.data()),std::streamsize(payloadSize));
+    }
+    if(!in || saveChecksum(payload)!=checksum) {
+        __android_log_print(ANDROID_LOG_WARN,"DG-0016",
+                            "Ignoring corrupt save payload");
+        return false;
+    }
+
+    std::unique_ptr<SaveSnapshot> snapshot(new SaveSnapshot{});
+    size_t cursor=0;
+    auto readAll=[&]() -> bool {
+        if(!loadPod(payload,cursor,snapshot->px) ||
+           !loadPod(payload,cursor,snapshot->pz) ||
+           !loadPod(payload,cursor,snapshot->yaw) ||
+           !loadPod(payload,cursor,snapshot->aimPitch) ||
+           !loadPod(payload,cursor,snapshot->heat) ||
+           !loadPod(payload,cursor,snapshot->playerHp) ||
+           !loadPod(payload,cursor,snapshot->respawnTimer) ||
+           !loadPod(payload,cursor,snapshot->chassisIntegrity)) return false;
+
+        for(int i=0;i<PART_COUNT;i++) {
+            if(!readBodyPart(payload,cursor,snapshot->playerParts[i])) return false;
+        }
+        for(int i=0;i<MAX_BODY_SLOTS;i++) {
+            if(!readStoredBody(payload,cursor,snapshot->bodySlots[i])) return false;
+        }
+
+        if(!loadPod(payload,cursor,snapshot->activeBodySlot) ||
+           !loadPod(payload,cursor,snapshot->bodyGeneration) ||
+           !loadBool(payload,cursor,snapshot->bodyPoolInitialized) ||
+           !loadBool(payload,cursor,snapshot->miniBotMode)) return false;
+
+        if(!loadPod(payload,cursor,snapshot->scrap) ||
+           !loadPod(payload,cursor,snapshot->circuits) ||
+           !loadPod(payload,cursor,snapshot->unknownEquipment) ||
+           !loadPod(payload,cursor,snapshot->identifiedEquipment) ||
+           !loadPod(payload,cursor,snapshot->laserEquipmentLevel) ||
+           !loadBool(payload,cursor,snapshot->laserLanceEquipped) ||
+           !loadPod(payload,cursor,snapshot->fabricationTimer) ||
+           !loadPod(payload,cursor,snapshot->fabricationSlot) ||
+           !loadPod(payload,cursor,snapshot->baseMode)) return false;
+
+        if(!readWreck(payload,cursor,snapshot->wreck)) return false;
+
+        if(!loadPod(payload,cursor,snapshot->enemyX) ||
+           !loadPod(payload,cursor,snapshot->enemyZ) ||
+           !loadPod(payload,cursor,snapshot->enemyYaw) ||
+           !loadPod(payload,cursor,snapshot->enemyHp) ||
+           !loadPod(payload,cursor,snapshot->enemyRespawn) ||
+           !loadPod(payload,cursor,snapshot->enemyAttackTimer) ||
+           !loadPod(payload,cursor,snapshot->bossX) ||
+           !loadPod(payload,cursor,snapshot->bossZ) ||
+           !loadPod(payload,cursor,snapshot->bossYaw) ||
+           !loadPod(payload,cursor,snapshot->bossHp) ||
+           !loadPod(payload,cursor,snapshot->bossAttackTimer) ||
+           !loadPod(payload,cursor,snapshot->bossLaserT) ||
+           !loadPod(payload,cursor,snapshot->bossShotDirX) ||
+           !loadPod(payload,cursor,snapshot->bossShotDirZ) ||
+           !loadPod(payload,cursor,snapshot->bossHitFlash) ||
+           !loadBool(payload,cursor,snapshot->bossDefeated)) return false;
+
+        if(!loadPod(payload,cursor,snapshot->ecosystemClock) ||
+           !loadPod(payload,cursor,snapshot->ecosystemAccumulator) ||
+           !loadPod(payload,cursor,snapshot->ecosystemPopulation) ||
+           !loadPod(payload,cursor,snapshot->ecosystemBirths) ||
+           !loadPod(payload,cursor,snapshot->ecosystemDeaths) ||
+           !loadPod(payload,cursor,snapshot->ecosystemKills) ||
+           !loadPod(payload,cursor,snapshot->ecosystemLastEvent) ||
+           !loadPod(payload,cursor,snapshot->ecosystemLastEventTimer) ||
+           !loadPod(payload,cursor,snapshot->ecosystemCycle) ||
+           !loadPod(payload,cursor,snapshot->worldNoise)) return false;
+
+        if(!loadPod(payload,cursor,snapshot->ecoEventWrite)) return false;
+        for(int i=0;i<ECO_EVENT_HISTORY;i++) {
+            if(!readEcoEvent(payload,cursor,snapshot->ecoEventHistory[i])) return false;
+        }
+
+        for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) {
+            if(!readEcoChunk(payload,cursor,snapshot->ecoChunks[i])) return false;
+        }
+        for(int i=0;i<MAX_ECO_ACTORS;i++) {
+            if(!readEcoActor(payload,cursor,snapshot->ecoActors[i])) return false;
+        }
+
+        return cursor==payload.size();
+    };
+
+    if(!readAll()) {
+        __android_log_print(ANDROID_LOG_WARN,"DG-0016",
+                            "Ignoring malformed save payload");
+        return false;
+    }
+
+    if(snapshot->activeBodySlot<0 || snapshot->activeBodySlot>=MAX_BODY_SLOTS ||
+       snapshot->fabricationSlot<-1 || snapshot->fabricationSlot>=MAX_BODY_SLOTS ||
+       snapshot->laserEquipmentLevel<0 || snapshot->laserEquipmentLevel>3 ||
+       snapshot->ecoEventWrite<0 || snapshot->ecoEventWrite>=ECO_EVENT_HISTORY ||
+       snapshot->baseMode>1 ||
+       snapshot->ecosystemPopulation<0 ||
+       snapshot->ecosystemCycle<0) {
+        return false;
+    }
+
+    px=wrapWorld(snapshot->px);
+    pz=wrapWorld(snapshot->pz);
+    yaw=snapshot->yaw;
+    aimPitch=std::clamp(snapshot->aimPitch,-0.25f,0.38f);
+    heat=std::clamp(snapshot->heat,0.0f,1.0f);
+    playerHp=std::clamp(snapshot->playerHp,0.0f,100.0f);
+    respawnTimer=std::max(0.0f,snapshot->respawnTimer);
+    chassisIntegrity=std::clamp(snapshot->chassisIntegrity,0.0f,100.0f);
+
+    for(int i=0;i<PART_COUNT;i++) playerParts[i]=snapshot->playerParts[i];
+    for(int i=0;i<MAX_BODY_SLOTS;i++) bodySlots[i]=snapshot->bodySlots[i];
+    activeBodySlot=snapshot->activeBodySlot;
+    bodyGeneration=std::max(1,snapshot->bodyGeneration);
+    bodyPoolInitialized=snapshot->bodyPoolInitialized!=0;
+    miniBotMode=snapshot->miniBotMode!=0;
+
+    scrap=std::max(0,snapshot->scrap);
+    circuits=std::max(0,snapshot->circuits);
+    unknownEquipment=std::max(0,snapshot->unknownEquipment);
+    identifiedEquipment=std::max(0,snapshot->identifiedEquipment);
+    laserEquipmentLevel=std::clamp(snapshot->laserEquipmentLevel,0,3);
+    laserLanceEquipped=snapshot->laserLanceEquipped!=0;
+
+    fabricationTimer=std::max(0.0f,snapshot->fabricationTimer);
+    fabricationSlot=snapshot->fabricationSlot;
+    baseMode=snapshot->baseMode?BaseMode::ORBITAL:BaseMode::LAND;
+
+    wreck=snapshot->wreck;
+    enemyX=wrapWorld(snapshot->enemyX);
+    enemyZ=wrapWorld(snapshot->enemyZ);
+    enemyYaw=snapshot->enemyYaw;
+    enemyHp=std::clamp(snapshot->enemyHp,0.0f,40.0f);
+    enemyRespawn=std::max(0.0f,snapshot->enemyRespawn);
+    enemyAttackTimer=snapshot->enemyAttackTimer;
+    bossX=wrapWorld(snapshot->bossX);
+    bossZ=wrapWorld(snapshot->bossZ);
+    bossYaw=snapshot->bossYaw;
+    bossHp=std::clamp(snapshot->bossHp,0.0f,180.0f);
+    bossAttackTimer=snapshot->bossAttackTimer;
+    bossLaserT=std::max(0.0f,snapshot->bossLaserT);
+    bossShotDirX=snapshot->bossShotDirX;
+    bossShotDirZ=snapshot->bossShotDirZ;
+    bossHitFlash=std::max(0.0f,snapshot->bossHitFlash);
+    bossDefeated=snapshot->bossDefeated!=0;
+
+    ecosystemClock=std::max(0.0f,snapshot->ecosystemClock);
+    ecosystemAccumulator=std::clamp(snapshot->ecosystemAccumulator,0.0f,1.0f);
+    ecosystemPopulation=std::clamp(snapshot->ecosystemPopulation,0,MAX_ECO_ACTORS);
+    ecosystemBirths=std::max(0,snapshot->ecosystemBirths);
+    ecosystemDeaths=std::max(0,snapshot->ecosystemDeaths);
+    ecosystemKills=std::max(0,snapshot->ecosystemKills);
+    ecosystemLastEvent=snapshot->ecosystemLastEvent;
+    ecosystemLastEventTimer=std::max(0.0f,snapshot->ecosystemLastEventTimer);
+    ecosystemCycle=snapshot->ecosystemCycle;
+    worldNoise=std::clamp(snapshot->worldNoise,0.0f,1.0f);
+
+    ecoEventWrite=snapshot->ecoEventWrite;
+    for(int i=0;i<ECO_EVENT_HISTORY;i++) ecoEventHistory[i]=snapshot->ecoEventHistory[i];
+    for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) ecoChunks[i]=snapshot->ecoChunks[i];
+    for(int i=0;i<MAX_ECO_ACTORS;i++) ecoActors[i]=snapshot->ecoActors[i];
+
+    refreshEcoChunkActivePopulation();
+
+    movePointer=-1;
+    aimPointer=-1;
+    firePointer=-1;
+    mapPointer=-1;
+    actionPointer=-1;
+    swapPointer=-1;
+    joyX=0.0f;
+    joyY=0.0f;
+    mapExpanded=false;
+    lastAimX=0.0f;
+    lastAimY=0.0f;
+    laserT=0.0f;
+    enemyLaserT=0.0f;
+    bossLaserT=0.0f;
+    autosaveTimer=0.0f;
+    lastTime=0.0;
+
+    __android_log_print(ANDROID_LOG_INFO,"DG-0016",
+                        "Loaded persistent save: %u bytes",payloadSize);
+    return true;
 }
 
 static void updateEnemy(float dt) {
