@@ -1,17 +1,27 @@
-# DG Build 0018
+# DG Build 0019
 
-> Current development slice: player + procedural terrain only. Combat, enemies, ecosystem, structures and navigation are switchable but disabled by default.
+Current development slice remains player + procedural terrain. Build 0019 adds an in-game ADMIN switchboard so registered runtime features can be turned on/off without changing the main loop.
 
-## Build 0018 — traversal foundation
-- Central `FeatureFlags` switchboard keeps major systems independently enable/disable-able.
-- The frame loop is split into player, world, transient and weapon-resolution systems instead of one monolithic update path.
-- Enemy, boss, ecosystem, weather, structures, wrecks, combat and navigation HUD are disabled in the current prototype slice.
-- Player respawn flow is isolated from combat/world systems and returns the player to the base spawn point.
-- Third-person camera distance is adjustable with an upper-screen vertical swipe.
-- Jump input and vertical player physics are isolated from horizontal movement.
-- Terrain-only HUD is reduced to movement, camera, jump and coordinates.
+## Build 0019 — in-game feature switchboard
+- Permanent ADMIN button remains available even when PLAYER is disabled.
+- Feature controls are organized into PLAYER, WORLD, GAMEPLAY and UI groups.
+- Every registered FeatureFlags system has an ON/OFF control.
+- Physical features show a temporary animated world beacon/ring at their corresponding physical anchor when enabled.
+- Information-only features briefly glow in the admin panel when enabled, then return to normal.
+- Every toggle shows an immediate ON/OFF message.
+- Disabling a feature clears relevant transient input/overlay state.
+- The modular update/render orchestration remains unchanged; ADMIN changes state through the central feature switchboard.
+
+### Registered admin features
+PLAYER, TERRAIN, STRUCT, WEATHER, ECO, ENEMY, BOSS, WRECK, COMBAT, NAV, PROGRESS, DEBUG.
+
+### Visual feedback
+- PHY: temporary animated world beacon/rings above the corresponding physical anchor.
+- INFO: temporary admin-panel glow for the toggled information feature.
+- Toggle message: feature name plus ON/OFF.
 
 ## Previous build history
+
 
 
 
