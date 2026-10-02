@@ -215,14 +215,16 @@ app/src/main/cpp/
 ├── native-lib.cpp                 # JNI bridge, shared state, game loop
 └── console/
     ├── command_parser.h/.cpp      # pure tokenization, suggestions, coordinates
-    └── command_console.inl        # game-state command execution and summon updates
+    ├── command_console.h/.cpp     # command execution contract and behavior
+    └── command_console.inl        # legacy-state adapter and summon updates
 ```
 
 `command_parser` is now a real Android-independent C++ module. It owns only
 pure command logic and has host-side tests in `tests/command_parser_test.cpp`.
-`command_console.inl` remains an internal implementation seam for game-state
-mutation: it is included by `native-lib.cpp` while the legacy shared state is
-still being replaced with explicit subsystem interfaces.
+`command_console` now executes against a narrow `CommandGameState` callback
+contract. `command_console.inl` only adapts the legacy game globals to that
+contract and retains summon simulation until the broader game state migration
+is complete.
 
 Run the parser tests with:
 

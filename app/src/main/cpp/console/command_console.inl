@@ -32,86 +32,63 @@ static bool summonEntity(int kind,float x,float z,std::string& result){
     return false;
 }
 
-static std::string executeAdminCommand(const std::string& raw){
-    const auto p=console::splitCommand(raw);
-    if(p.empty())return {};
-    std::string cmd=p[0];
-    if(!cmd.empty()&&cmd[0]=='/')cmd=cmd.substr(1);
-
-    if(cmd=="summon"){
-        if(p.size()<2)return "USAGE: /summon <npc|boss> <name> [x] [z]";
-        const bool typed=p[1]=="npc"||p[1]=="boss";
-        if(typed&&p.size()<3)return "USAGE: /summon "+p[1]+" <name> [x] [z]";
-        const std::string name=typed?p[2]:p[1];
-        const int kind=commandEntityKind(name);
-        if(kind<0)return "UNKNOWN ENTITY: "+name;
-        if(typed&&((p[1]=="npc")==summonKindIsBoss(kind)))return "TYPE MISMATCH";
-        const int coord=typed?3:2;
-        float x=px,z=pz;
-        if((int)p.size()==coord){
-            const float angle=float(nextSummonedId)*0.91f;
-            const float radius=summonKindIsBoss(kind)?4.0f:2.4f;
-            x=px+std::cos(angle)*radius;
-            z=pz+std::sin(angle)*radius;
-        }
-        if((int)p.size()>coord&&!console::parseCommandFloat(p[coord],px,x))return "BAD X";
-        if((int)p.size()>coord+1&&!console::parseCommandFloat(p[coord+1],pz,z))return "BAD Z";
-        std::string result;
-        summonEntity(kind,x,z,result);
-        return result;
-    }
-
-    if(cmd=="list"){
-        int total=0,npcs=0,bosses=0;
-        for(const auto& e:summonedEntities)if(e.active){
-            ++total;
-            if(summonKindIsBoss(e.kind))++bosses;else++npcs;
-        }
-        return "SUMMONS "+std::to_string(total)+" | NPC "+std::to_string(npcs)+" | BOSSES "+std::to_string(bosses);
-    }
-
-    if(cmd=="kill"){
-        if(p.size()<2)return "USAGE: /kill <id|all|npcs|bosses>";
-        int count=0;
-        for(auto& e:summonedEntities){
-            if(!e.active)continue;
-            bool match=p[1]=="all" ||
-                (p[1]=="npcs"&&!summonKindIsBoss(e.kind)) ||
-                (p[1]=="bosses"&&summonKindIsBoss(e.kind));
-            if(!match){try{match=e.id==std::stoi(p[1]);}catch(...){}}
-            if(match){e.active=false;++count;}
-        }
-        return "KILLED "+std::to_string(count);
-    }
-
-    if(cmd=="clear"){
-        int count=0;
-        for(auto& e:summonedEntities)if(e.active){e.active=false;++count;}
-        return "CLEARED "+std::to_string(count)+" SUMMONS";
-    }
-
-    if(cmd=="tp"){
-        if(p.size()<3)return "USAGE: /tp <x> <z>";
-        float x,z;
-        if(!console::parseCommandFloat(p[1],px,x)||!console::parseCommandFloat(p[2],pz,z))
-            return "BAD COORDS";
-        px=wrapWorld(x);
-        pz=wrapWorld(z);
-        return "TELEPORTED TO "+std::to_string((int)std::round(px))+
-               " "+std::to_string((int)std::round(pz));
-    }
-
-    return "UNKNOWN COMMAND";
-}
-
 static void updateAdminCommandQueue(){
     std::string command;
     {
         std::lock_guard<std::mutex> lock(commandMutex);
-        if(pendingAdminCommand.empty())return;
+        if(pendingAdminCommand.empty()) return;
         command.swap(pendingAdminCommand);
     }
-    const std::string result=executeAdminCommand(command);
+
+    console::CommandGameState state;
+    state.playerX=px;
+    state.playerZ=pz;
+    state.nextSummonedId=nextSummonedId;
+    state.resolveEntityKind=[](const std::string& name){
+        return commandEntityKind(name);
+    };
+    state.isBossKind=[](int kind){
+        return summonKindIsBoss(kind);
+    };
+    state.summon=[](int kind,float x,float z){
+        std::string result;
+        const bool success=summonEntity(kind,x,z,result);
+        return console::SpawnResult{success,result};
+    };
+    state.countSummons=[](){
+        console::SummonCounts counts;
+        for(const auto& e:summonedEntities) if(e.active){
+            ++counts.total;
+            if(summonKindIsBoss(e.kind)) ++counts.bosses;
+            else ++counts.npcs;
+        }
+        return counts;
+    };
+    state.killSummons=[](const std::string& selector){
+        int count=0;
+        for(auto& e:summonedEntities){
+            if(!e.active) continue;
+            bool match=selector=="all" ||
+                (selector=="npcs"&&!summonKindIsBoss(e.kind)) ||
+                (selector=="bosses"&&summonKindIsBoss(e.kind));
+            if(!match){
+                try{match=e.id==std::stoi(selector);}catch(...){ }
+            }
+            if(match){e.active=false;++count;}
+        }
+        return count;
+    };
+    state.clearSummons=[](){
+        int count=0;
+        for(auto& e:summonedEntities) if(e.active){e.active=false;++count;}
+        return count;
+    };
+    state.teleportPlayer=[](float x,float z){
+        px=wrapWorld(x);
+        pz=wrapWorld(z);
+    };
+
+    const std::string result=console::executeCommand(command,state);
     {
         std::lock_guard<std::mutex> lock(commandMutex);
         commandLastResult=result;

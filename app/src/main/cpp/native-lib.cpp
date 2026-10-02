@@ -14,6 +14,7 @@
 #include <mutex>
 
 #include "console/command_parser.h"
+#include "console/command_console.h"
 
 namespace dg {
 
