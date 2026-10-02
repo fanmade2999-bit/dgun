@@ -52,7 +52,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Terrain remains deterministic: the same chunk/tile coordinates regenerate the same terrain.
 
 ### Toroidal procedural world
-- The playable world is now a finite **128 × 128 world-unit torus**.
+- The playable world is a finite **1024 × 1024 world-unit torus**.
 - Moving past the eastern boundary wraps to the western side; the same works north/south.
 - Terrain is generated deterministically from wrapped tile coordinates, so the same location is reproducible after restarting.
 - The renderer only draws a local generated window around the player, so the world can be larger than the visible area without drawing the entire map.
@@ -61,7 +61,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
 ### Autonomous ecosystem
 - A world-owned ecosystem now runs independently of the player.
-- 30 autonomous actors are initially distributed across the full world; the simulation can grow to 48.
+- 48 autonomous actors are initially distributed across the full world; the simulation can grow to 96.
 - Grazers seek food patches, hunters choose prey and feed, and scavengers seek carcasses.
 - Hunger, energy, age, local movement, predation, starvation, reproduction, and corpses are simulated.
 - The ecosystem advances on a background simulation clock even when the player is far away, dead, or viewing the expanded map.
@@ -89,6 +89,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - The player's laser can hit and kill ecosystem actors, creating a world event that other creatures can react to.
 - Unattended mech wrecks are now scavengeable by autonomous scavengers, so salvage can decay over time.
 - Mutable game state now persists across app restarts: player position/body state, resources, progression, boss state, wrecks, ecosystem actors/chunks, weather clock and event history are saved.
+- Persistent world state is restored on relaunch rather than reinitializing a fresh ecosystem.
 
 ### World cycle and weather
 - The autonomous world has a 240-second ecological cycle.
