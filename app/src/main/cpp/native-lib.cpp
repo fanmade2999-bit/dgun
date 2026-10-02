@@ -160,6 +160,58 @@ struct FeatureFlags {
 
 static FeatureFlags features{};
 
+enum AdminFeatureGroup : uint8_t {
+    ADMIN_GROUP_PLAYER=0,
+    ADMIN_GROUP_WORLD=1,
+    ADMIN_GROUP_GAMEPLAY=2,
+    ADMIN_GROUP_UI=3
+};
+
+enum AdminEffectKind : uint8_t {
+    ADMIN_EFFECT_INFO=0,
+    ADMIN_EFFECT_PHYSICAL=1
+};
+
+enum AdminAnchorKind : uint8_t {
+    ADMIN_ANCHOR_NONE=0,
+    ADMIN_ANCHOR_PLAYER,
+    ADMIN_ANCHOR_STRUCTURES,
+    ADMIN_ANCHOR_ECO,
+    ADMIN_ANCHOR_ENEMY,
+    ADMIN_ANCHOR_BOSS,
+    ADMIN_ANCHOR_WRECK
+};
+
+struct FeatureDefinition {
+    const char* label;
+    AdminFeatureGroup group;
+    AdminEffectKind effect;
+    AdminAnchorKind anchor;
+    bool FeatureFlags::*member;
+};
+
+static constexpr FeatureDefinition FEATURE_DEFS[] = {
+    {"PLAYER",  ADMIN_GROUP_PLAYER,  ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_PLAYER,     &FeatureFlags::player},
+
+    {"TERRAIN", ADMIN_GROUP_WORLD,   ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::terrain},
+    {"STRUCT",  ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_STRUCTURES, &FeatureFlags::worldStructures},
+    {"WEATHER", ADMIN_GROUP_WORLD,   ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::weather},
+    {"ECO",     ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_ECO,        &FeatureFlags::ecosystem},
+    {"ENEMY",   ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_ENEMY,      &FeatureFlags::enemy},
+    {"BOSS",    ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_BOSS,       &FeatureFlags::boss},
+    {"WRECK",   ADMIN_GROUP_WORLD,   ADMIN_EFFECT_PHYSICAL, ADMIN_ANCHOR_WRECK,      &FeatureFlags::wrecks},
+
+    {"COMBAT",  ADMIN_GROUP_GAMEPLAY,ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::playerCombat},
+
+    {"NAV",     ADMIN_GROUP_UI,      ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::navigationHud},
+    {"PROGRESS",ADMIN_GROUP_UI,      ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::progressionHud},
+    {"DEBUG",   ADMIN_GROUP_UI,      ADMIN_EFFECT_INFO,     ADMIN_ANCHOR_NONE,       &FeatureFlags::terrainDebug}
+};
+
+static constexpr int FEATURE_COUNT =
+    int(sizeof(FEATURE_DEFS)/sizeof(FEATURE_DEFS[0]));
+
+static void toggleAdminFeature(int index);
 static void configurePrototypeFeatures() {
     // Single switchboard for development slices. The current slice deliberately
     // contains only the player, procedural terrain, camera-range gesture and
@@ -447,6 +499,16 @@ static int jumpPointer=-1;
 static int cameraPointer=-1;
 static int mapPointer=-1;
 static bool mapExpanded=false;
+
+static int adminPointer=-1;
+static bool adminOpen=false;
+static float adminToastTimer=0.0f;
+static int adminToastFeature=-1;
+static bool adminToastEnabled=false;
+static int adminBeaconFeature=-1;
+static float adminBeaconTimer=0.0f;
+static int adminInfoFlashFeature=-1;
+static float adminInfoFlashTimer=0.0f;
 static float joyX=0.0f, joyY=0.0f;
 static float lastAimX=0.0f, lastAimY=0.0f;
 static float lastCameraY=0.0f;
@@ -662,7 +724,7 @@ static void initGL() {
     glClearColor(0.025f,0.035f,0.05f,1.0f);
     initializeBodyPool();
     initializeEcosystem();
-    loadGame();
+    if(features.persistence) loadGame();
 }
 
 static void drawCube(
@@ -2675,9 +2737,276 @@ static void drawMinimalHud(const Mat4& hud) {
                0.72f,0.86f,0.92f,0.80f);
 }
 
+static bool pointInAdminButton(float x,float y,float w,float h) {
+    const float x1=w*0.82f;
+    const float x2=w*0.98f;
+    const float y1=h*0.012f;
+    const float y2=h*0.082f;
+    return x>=x1 && x<=x2 && y>=y1 && y<=y2;
+}
+
+static int adminColumnCount() {
+    return viewportW>=1050 ? 3 : 2;
+}
+
+static int adminGroupCount(AdminFeatureGroup group) {
+    int count=0;
+    for(const auto& def:FEATURE_DEFS) {
+        if(def.group==group) ++count;
+    }
+    return count;
+}
+
+static int adminGroupRows(AdminFeatureGroup group) {
+    const int cols=adminColumnCount();
+    const int count=adminGroupCount(group);
+    return (count+cols-1)/cols;
+}
+
+static void adminFeatureRect(int index,float& x1,float& y1,float& x2,float& y2) {
+    const float panelX=viewportW*0.06f;
+    const float panelW=viewportW*0.88f;
+    const float inner=12.0f;
+    const float gap=8.0f;
+    const int cols=adminColumnCount();
+    const float rowH=std::clamp(viewportH*0.060f,30.0f,42.0f);
+    const float colW=(panelW-inner*2.0f-gap*float(cols-1))/float(cols);
+
+    const AdminFeatureGroup group=FEATURE_DEFS[index].group;
+    float y=viewportH*0.05f+56.0f;
+    for(int g=0;g<int(group);g++) {
+        y += 23.0f+float(adminGroupRows(AdminFeatureGroup(g)))*rowH+8.0f;
+    }
+
+    int ordinal=0;
+    for(int i=0;i<index;i++) {
+        if(FEATURE_DEFS[i].group==group) ++ordinal;
+    }
+
+    const int col=ordinal%cols;
+    const int row=ordinal/cols;
+    x1=panelX+inner+float(col)*(colW+gap);
+    y1=y+23.0f+float(row)*rowH+2.0f;
+    x2=x1+colW;
+    y2=y1+rowH-5.0f;
+}
+
+static int adminFeatureAtPoint(float x,float y) {
+    for(int i=0;i<FEATURE_COUNT;i++) {
+        float x1,y1,x2,y2;
+        adminFeatureRect(i,x1,y1,x2,y2);
+        if(x>=x1 && x<=x2 && y>=y1 && y<=y2) return i;
+    }
+    return -1;
+}
+
+static void drawAdminRing3D(const Mat4& vp,float x,float y,float z,float radius,
+                            float r,float g,float b,float a) {
+    constexpr int SEG=24;
+    float verts[(SEG+1)*3]{};
+    for(int i=0;i<=SEG;i++) {
+        const float t=float(i)/float(SEG)*2.0f*PI;
+        verts[i*3+0]=x+std::cos(t)*radius;
+        verts[i*3+1]=y;
+        verts[i*3+2]=z+std::sin(t)*radius;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER,0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,0,verts);
+    glUniformMatrix4fv(uMvp,1,GL_FALSE,vp.m);
+    glUniform4f(uColor,r,g,b,a);
+    glDrawArrays(GL_LINE_STRIP,0,SEG+1);
+}
+
+static void drawAdminBeaconAt(const Mat4& vp,Vec3 p,
+                              float r,float g,float b,float strength) {
+    const float pulse=0.65f+0.35f*std::sin(float(nowSeconds()*12.0));
+    drawCube(vp,{p.x,p.y+1.05f,p.z},{0.045f,1.05f,0.045f},
+             0.0f,r,g,b,(0.35f+0.25f*pulse)*strength);
+    drawAdminRing3D(vp,p.x,p.y+1.60f,p.z,
+                    0.42f+0.18f*pulse,r,g,b,0.54f*strength);
+    drawAdminRing3D(vp,p.x,p.y+2.20f,p.z,
+                    0.16f+0.10f*pulse,r,g,b,0.78f*strength);
+    drawCube(vp,{p.x,p.y+2.48f,p.z},{0.10f,0.10f,0.10f},
+             0.0f,r,g,b,0.82f*strength);
+}
+
+static bool adminResolvePhysicalAnchor(int index,Vec3& p) {
+    if(index<0 || index>=FEATURE_COUNT) return false;
+
+    switch(FEATURE_DEFS[index].anchor) {
+        case ADMIN_ANCHOR_PLAYER:
+            p={px,py,pz};
+            return true;
+        case ADMIN_ANCHOR_STRUCTURES:
+            p={nearestWorldImage(BASE_X,px),0.0f,nearestWorldImage(BASE_Z,pz)};
+            return true;
+        case ADMIN_ANCHOR_ECO: {
+            int best=-1;
+            float bestDistance=999999.0f;
+            for(int i=0;i<MAX_ECO_ACTORS;i++) {
+                if(!ecoActors[i].alive) continue;
+                const float d=ecoDistanceTo(px,pz,ecoActors[i].x,ecoActors[i].z);
+                if(d<bestDistance) { bestDistance=d; best=i; }
+            }
+            if(best<0) return false;
+            p={nearestWorldImage(ecoActors[best].x,px),
+               (ecoActors[best].kind==ECO_HUNTER)?0.45f:0.32f,
+               nearestWorldImage(ecoActors[best].z,pz)};
+            return true;
+        }
+        case ADMIN_ANCHOR_ENEMY:
+            p={nearestWorldImage(enemyX,px),0.0f,nearestWorldImage(enemyZ,pz)};
+            return true;
+        case ADMIN_ANCHOR_BOSS:
+            if(bossDefeated) return false;
+            p={nearestWorldImage(bossX,px),0.0f,nearestWorldImage(bossZ,pz)};
+            return true;
+        case ADMIN_ANCHOR_WRECK:
+            if(!wreck.active) return false;
+            p={nearestWorldImage(wreck.x,px),0.0f,nearestWorldImage(wreck.z,pz)};
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void drawAdminBeacon(const Mat4& vp) {
+    if(adminBeaconFeature<0 || adminBeaconTimer<=0.0f) return;
+
+    const float fade=std::clamp(adminBeaconTimer/3.0f,0.0f,1.0f);
+    const auto& def=FEATURE_DEFS[adminBeaconFeature];
+
+    if(def.anchor==ADMIN_ANCHOR_STRUCTURES) {
+        drawAdminBeaconAt(vp,
+            {nearestWorldImage(BASE_X,px),0.0f,nearestWorldImage(BASE_Z,pz)},
+            0.25f,0.78f,1.0f,fade);
+        drawAdminBeaconAt(vp,
+            {nearestWorldImage(FACILITY_X,px),0.0f,nearestWorldImage(FACILITY_Z,pz)},
+            0.95f,0.62f,0.18f,fade*0.85f);
+        return;
+    }
+
+    Vec3 p{};
+    if(!adminResolvePhysicalAnchor(adminBeaconFeature,p)) return;
+
+    float r=0.35f,g=0.82f,b=1.0f;
+    if(def.anchor==ADMIN_ANCHOR_ENEMY) { r=1.0f;g=0.38f;b=0.12f; }
+    if(def.anchor==ADMIN_ANCHOR_BOSS)  { r=1.0f;g=0.18f;b=0.08f; }
+    if(def.anchor==ADMIN_ANCHOR_ECO)   { r=0.30f;g=1.0f;b=0.48f; }
+    if(def.anchor==ADMIN_ANCHOR_WRECK) { r=0.48f;g=0.82f;b=0.92f; }
+    drawAdminBeaconAt(vp,p,r,g,b,fade);
+}
+
+static void drawAdminButton(const Mat4& hud) {
+    const float x1=viewportW*0.82f;
+    const float x2=viewportW*0.98f;
+    const float y1=viewportH*0.012f;
+    const float y2=viewportH*0.082f;
+    const float pulse=adminOpen?1.0f:(adminToastTimer>0.0f?0.82f:0.45f);
+    drawRect2D(hud,x1-3.0f,y1-3.0f,x2+3.0f,y2+3.0f,
+               0.20f,0.78f,0.96f,0.12f*pulse);
+    drawRect2D(hud,x1,y1,x2,y2,
+               0.018f,0.040f,0.058f,0.92f);
+    drawText2D(hud,"ADMIN",x1+9.0f,y1+7.0f,2.15f,
+               0.72f,0.94f,1.0f,0.96f);
+}
+
+static void drawAdminToast(const Mat4& hud) {
+    if(adminToastFeature<0 || adminToastTimer<=0.0f) return;
+
+    const float width=std::min(viewportW*0.34f,330.0f);
+    const float x1=(viewportW-width)*0.50f;
+    const float y1=viewportH*0.095f;
+    const float y2=y1+38.0f;
+    const float pulse=0.72f+0.28f*std::sin(float(nowSeconds()*18.0));
+    drawRect2D(hud,x1-4.0f,y1-4.0f,x1+width+4.0f,y2+4.0f,
+               0.18f,0.82f,0.98f,0.12f*pulse);
+    drawRect2D(hud,x1,y1,x1+width,y2,0.012f,0.027f,0.040f,0.94f);
+
+    char msg[48]{};
+    std::snprintf(msg,sizeof(msg),"%s %s",FEATURE_DEFS[adminToastFeature].label,
+                  adminToastEnabled?"ON":"OFF");
+    drawText2D(hud,msg,x1+14.0f,y1+9.0f,2.20f,
+               adminToastEnabled?0.78f:0.48f,
+               adminToastEnabled?1.0f:0.58f,
+               adminToastEnabled?0.96f:0.66f,0.96f);
+}
+
+static void drawAdminPanel(const Mat4& hud) {
+    const float x1=viewportW*0.06f;
+    const float x2=viewportW*0.94f;
+    const float y1=viewportH*0.055f;
+    const float y2=viewportH*0.945f;
+
+    drawRect2D(hud,x1-6.0f,y1-6.0f,x2+6.0f,y2+6.0f,
+               0.18f,0.74f,0.90f,0.12f);
+    drawRect2D(hud,x1,y1,x2,y2,0.008f,0.016f,0.028f,0.95f);
+
+    drawText2D(hud,"ADMIN",x1+18.0f,y1+13.0f,3.2f,
+               0.76f,0.94f,1.0f,0.98f);
+    drawText2D(hud,"PHY",x2-112.0f,y1+17.0f,1.55f,
+               0.50f,0.86f,0.68f,0.80f);
+    drawText2D(hud,"INFO",x2-60.0f,y1+17.0f,1.55f,
+               0.55f,0.70f,0.92f,0.78f);
+
+    static const char* groupLabels[]={"PLAYER","WORLD","GAMEPLAY","UI"};
+    const float rowH=std::clamp(viewportH*0.060f,30.0f,42.0f);
+    float headerY=y1+50.0f;
+    for(int g=0;g<4;g++) {
+        drawText2D(hud,groupLabels[g],x1+12.0f,headerY,1.85f,
+                   0.60f,0.76f,0.84f,0.78f);
+        headerY+=23.0f+float(adminGroupRows(AdminFeatureGroup(g)))*rowH+8.0f;
+    }
+
+    for(int i=0;i<FEATURE_COUNT;i++) {
+        float bx1,by1,bx2,by2;
+        adminFeatureRect(i,bx1,by1,bx2,by2);
+        const auto& def=FEATURE_DEFS[i];
+        const bool enabled=features.*(def.member);
+
+        if(i==adminInfoFlashFeature && adminInfoFlashTimer>0.0f) {
+            const float pulse=0.28f+0.25f*std::sin(float(nowSeconds()*20.0));
+            drawRect2D(hud,bx1-4.0f,by1-4.0f,bx2+4.0f,by2+4.0f,
+                       0.24f,0.80f,1.0f,pulse);
+        }
+
+        drawRect2D(hud,bx1,by1,bx2,by2,
+                   enabled?0.050f:0.020f,
+                   enabled?0.095f:0.038f,
+                   enabled?0.125f:0.052f,0.95f);
+
+        const float textScale=std::clamp(std::min(viewportW,viewportH)*0.0033f,
+                                         1.55f,2.20f);
+        drawText2D(hud,def.label,bx1+8.0f,by1+6.0f,textScale,
+                   enabled?0.78f:0.40f,
+                   enabled?0.94f:0.52f,
+                   enabled?1.0f:0.64f,0.96f);
+
+        const char* effect=def.effect==ADMIN_EFFECT_PHYSICAL?"PHY":"INFO";
+        drawText2D(hud,effect,bx2-76.0f,by1+8.0f,1.25f,
+                   def.effect==ADMIN_EFFECT_PHYSICAL?0.48f:0.46f,
+                   def.effect==ADMIN_EFFECT_PHYSICAL?0.84f:0.62f,
+                   def.effect==ADMIN_EFFECT_PHYSICAL?0.64f:0.86f,0.72f);
+
+        const char* status=enabled?"ON":"OFF";
+        drawText2D(hud,status,bx2-40.0f,by1+6.0f,1.65f,
+                   enabled?0.48f:0.30f,
+                   enabled?0.96f:0.50f,
+                   enabled?0.72f:0.56f,0.92f);
+    }
+}
+
 static void drawHud() {
     const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
     glDisable(GL_DEPTH_TEST);
+
+    drawAdminButton(hud);
+    if(adminOpen) {
+        drawAdminPanel(hud);
+        drawAdminToast(hud);
+        glEnable(GL_DEPTH_TEST);
+        return;
+    }
 
     const bool minimal =
         !features.playerCombat &&
@@ -2692,6 +3021,7 @@ static void drawHud() {
 
     if(minimal) {
         drawMinimalHud(hud);
+        drawAdminToast(hud);
         glEnable(GL_DEPTH_TEST);
         return;
     }
@@ -2941,10 +3271,11 @@ static void drawHud() {
                        0.75f,0.88f,0.96f,0.82f);
         }
     
-        if(mapExpanded) {
+        if(features.navigationHud && mapExpanded) {
             drawMinimap(hud,true);
         }
-    
+
+        drawAdminToast(hud);
         glEnable(GL_DEPTH_TEST);
 }
 
@@ -3127,6 +3458,67 @@ static void resetPlayerBody() {
     chassisIntegrity=100.0f;
     heat=0.0f;
     aimPitch=0.18f;
+}
+
+static void toggleAdminFeature(int index) {
+    if(index<0 || index>=FEATURE_COUNT) return;
+
+    const FeatureDefinition& def=FEATURE_DEFS[index];
+    bool& enabled=features.*(def.member);
+    enabled=!enabled;
+
+    adminToastFeature=index;
+    adminToastEnabled=enabled;
+    adminToastTimer=1.65f;
+    adminBeaconFeature=-1;
+    adminBeaconTimer=0.0f;
+    adminInfoFlashFeature=-1;
+    adminInfoFlashTimer=0.0f;
+
+    if(enabled) {
+        if(def.effect==ADMIN_EFFECT_PHYSICAL) {
+            Vec3 probe{};
+            if(adminResolvePhysicalAnchor(index,probe)) {
+                adminBeaconFeature=index;
+                adminBeaconTimer=3.0f;
+            }
+        } else {
+            adminInfoFlashFeature=index;
+            adminInfoFlashTimer=1.20f;
+        }
+    }
+
+    // Disabling a system immediately releases its input/overlay state so an
+    // old pointer cannot reactivate it behind the ADMIN panel.
+    if(!enabled) {
+        if(def.member==&FeatureFlags::player) {
+            movePointer=-1;
+            aimPointer=-1;
+            firePointer=-1;
+            jumpPointer=-1;
+            cameraPointer=-1;
+            mapPointer=-1;
+            joyX=0.0f;
+            joyY=0.0f;
+            laserT=0.0f;
+            mapExpanded=false;
+        } else if(def.member==&FeatureFlags::playerCombat) {
+            firePointer=-1;
+            aimPointer=-1;
+            laserT=0.0f;
+        } else if(def.member==&FeatureFlags::navigationHud) {
+            mapPointer=-1;
+            mapExpanded=false;
+        } else if(def.member==&FeatureFlags::worldStructures) {
+            actionPointer=-1;
+            swapPointer=-1;
+            actionPointerActive=false;
+        } else if(def.member==&FeatureFlags::enemy) {
+            enemyLaserT=0.0f;
+        } else if(def.member==&FeatureFlags::boss) {
+            bossLaserT=0.0f;
+        }
+    }
 }
 
 static void storeDestroyedWreck() {
@@ -3413,6 +3805,7 @@ static bool readEcoEvent(const std::vector<uint8_t>& data,size_t& cursor,EcoEven
 }
 
 static bool saveGame() {
+    if(!features.persistence) return false;
     const std::string path=saveFilePath();
     if(path.empty()) return false;
 
@@ -4001,6 +4394,12 @@ static void updateTransientSystems(float dt) {
     playerHitFlash=std::max(0.0f,playerHitFlash-dt);
     enemyHitFlash=std::max(0.0f,enemyHitFlash-dt);
     bossHitFlash=std::max(0.0f,bossHitFlash-dt);
+
+    adminToastTimer=std::max(0.0f,adminToastTimer-dt);
+    adminBeaconTimer=std::max(0.0f,adminBeaconTimer-dt);
+    adminInfoFlashTimer=std::max(0.0f,adminInfoFlashTimer-dt);
+    if(adminBeaconTimer<=0.0f) adminBeaconFeature=-1;
+    if(adminInfoFlashTimer<=0.0f) adminInfoFlashFeature=-1;
 }
 
 static void resolvePlayerWeaponHits(float dt) {
@@ -4122,7 +4521,7 @@ static void update(float dt) {
     updateTransientSystems(dt);
     resolvePlayerWeaponHits(dt);
 
-    if(!savePath.empty() && autosaveTimer>=5.0f) {
+    if(features.persistence && !savePath.empty() && autosaveTimer>=5.0f) {
         saveGame();
     }
 }
@@ -4188,6 +4587,7 @@ static void frame() {
     const Mat4 vp=mulM(proj,lookAt(eye,target,{0,1,0}));
 
     drawWorldScene(vp);
+    drawAdminBeacon(vp);
     if(features.enemy) drawEnemyLaser(vp);
     if(features.boss) drawBossLaser(vp);
     drawHud();
@@ -4206,12 +4606,26 @@ static bool pointInJumpButton(float x,float y,float w,float h) {
 }
 
 static void touch(int pointerId,int action,float x,float y,float w,float h) {
-    if(!features.player) return;
-
-    const bool leftZone=x<w*0.45f;
-
     if(action==ACTION_DOWN || action==ACTION_POINTER_DOWN) {
-        if(!leftZone && pointInMapButton(x,y,w,h) && mapPointer<0) {
+        if(pointInAdminButton(x,y,w,h)) {
+            adminPointer=pointerId;
+            adminOpen=!adminOpen;
+            mapExpanded=false;
+            return;
+        }
+
+        if(adminOpen) {
+            const int feature=adminFeatureAtPoint(x,y);
+            if(feature>=0) toggleAdminFeature(feature);
+            return;
+        }
+
+        if(!features.player) return;
+
+        const bool leftZone=x<w*0.45f;
+
+        if(features.navigationHud && !leftZone &&
+           pointInMapButton(x,y,w,h) && mapPointer<0) {
             mapPointer=pointerId;
             mapExpanded=!mapExpanded;
             return;
@@ -4219,13 +4633,16 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
 
         if(mapExpanded) return;
 
-        if(!leftZone && pointInCameraGesture(x,y,w,h) && cameraPointer<0) {
+        if(features.camera && !leftZone &&
+           pointInCameraGesture(x,y,w,h) && cameraPointer<0) {
             cameraPointer=pointerId;
             lastCameraY=y;
-        } else if(!leftZone && pointInJumpButton(x,y,w,h) && jumpPointer<0) {
+        } else if(features.playerJump && !leftZone &&
+                  pointInJumpButton(x,y,w,h) && jumpPointer<0) {
             jumpPointer=pointerId;
             jumpRequested=true;
-        } else if(leftZone && movePointer<0) {
+        } else if(features.player && features.playerMovement &&
+                  leftZone && movePointer<0) {
             movePointer=pointerId;
             const float baseX=w*0.18f;
             const float baseY=h*0.78f;
@@ -4252,19 +4669,21 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
         return;
     }
 
+    if(adminOpen) return;
+
     if(action==ACTION_MOVE) {
-        if(pointerId==movePointer) {
+        if(pointerId==movePointer && features.playerMovement) {
             const float baseX=w*0.18f;
             const float baseY=h*0.78f;
             const float radius=h*0.20f;
             joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
             joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
-        } else if(pointerId==cameraPointer) {
+        } else if(pointerId==cameraPointer && features.camera) {
             const float dy=y-lastCameraY;
             cameraDistance=std::clamp(cameraDistance+dy*0.018f,
                                        CAMERA_DISTANCE_MIN,CAMERA_DISTANCE_MAX);
             lastCameraY=y;
-        } else if(pointerId==aimPointer) {
+        } else if(pointerId==aimPointer && features.playerCombat) {
             updateAim(x,y);
         }
         return;
@@ -4295,6 +4714,7 @@ static void touch(int pointerId,int action,float x,float y,float w,float h) {
             firePointer=-1;
             laserT=0.0f;
         }
+        if(pointerId==adminPointer || action==ACTION_CANCEL) adminPointer=-1;
     }
 }
 
