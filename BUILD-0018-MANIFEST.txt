@@ -1,0 +1,41 @@
+BUILD: 0018
+APP ID: com.fanmade.dg
+VERSION: 0.1.8
+VERSION CODE: 18
+
+NEW IN THIS BUILD
+- Major gameplay systems now sit behind one FeatureFlags switchboard.
+- The active development slice contains only the player and deterministic procedural terrain.
+- Enemy, boss, ecosystem, weather, structures, wrecks, combat and navigation UI are disabled by default.
+- The main frame/update path is separated into player, world, transient and weapon-resolution systems.
+- Player respawn is isolated as a reusable player-system flow.
+- Third-person camera range can be changed with an upper-screen vertical swipe.
+- Jumping uses a small vertical physics model with grounded/airborne state.
+- Terrain-only HUD is reduced to movement, camera, jump and coordinates.
+
+RESPAWN
+- Death/respawn state is still implemented even while combat is disabled.
+- Respawn returns the player to the base spawn location and selects an available chassis when one exists.
+- Input state is cleared during the respawn transition so stale touches cannot survive a body transition.
+
+CAMERA / JUMP
+- Camera distance range: 4.2 to 10.5 world units.
+- Upper-center vertical swipe adjusts camera distance.
+- Jump is one press per grounded jump; holding the control does not auto-bunny-hop.
+- Vertical velocity, gravity and grounded state are independent from horizontal movement.
+
+ARCHITECTURE
+- Feature switches are configured in configurePrototypeFeatures().
+- update() is intentionally small and delegates to subsystem functions.
+- drawWorldScene() owns render-layer enable/disable decisions.
+- The disabled systems remain available for later builds without being executed in the current slice.
+
+SAVE FORMAT
+- Schema version: 5
+- Player vertical state and camera distance are persisted.
+- Existing older-version saves are ignored.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA
