@@ -1,0 +1,25 @@
+BUILD: 0020
+APP ID: com.fanmade.dg
+VERSION: 0.2.0
+VERSION CODE: 20
+
+NEW IN THIS BUILD
+- Expanded FeatureFlags into independently switchable player, world, gameplay and UI/system subsystems.
+- ADMIN now exposes 21 registered feature switches, matching every FeatureFlags boolean.
+- Player controls are separately switchable: PLAYER, MOVE, AIM, JUMP, CAMERA, RESPAWN.
+- Gameplay systems are separately switchable: COMBAT, BODY, SALVAGE, GEAR.
+- World systems remain separately switchable: TERRAIN, STRUCT, WEATHER, ECO, ENEMY, BOSS, WRECK.
+- UI/system features remain separately switchable: NAV, PROGRESS, SAVE, DEBUG.
+- Feature disable paths now clear relevant transient input/state to prevent stale interactions.
+- Body/salvage/equipment actions are gated independently instead of sharing one broad switch.
+- SAVE controls startup load and autosave behavior.
+- Camera range, player movement and jumping can be disabled independently.
+
+CURRENT DEFAULT SLICE
+- ON: PLAYER, MOVE, JUMP, CAMERA, RESPAWN, TERRAIN, SAVE.
+- OFF: AIM, combat, structures, weather, ecosystem, enemy, boss, wrecks, body, salvage, gear, navigation, progress, debug.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA
