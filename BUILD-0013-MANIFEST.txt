@@ -10,6 +10,7 @@ NEW IN THIS BUILD
 - Grazers and scavengers can flee from player presence/noise.
 - Wildlife can be directly hit by the player's laser.
 - Player-caused wildlife kills become ecosystem world events.
+- Nearby same-group creatures propagate alarm from disturbances.
 - Unattended mech wrecks can be stripped by autonomous scavengers.
 - Recent ecosystem activity remains visible on the strategic map.
 
