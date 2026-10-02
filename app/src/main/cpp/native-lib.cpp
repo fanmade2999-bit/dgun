@@ -15,6 +15,7 @@
 
 #include "console/command_parser.h"
 #include "console/command_console.h"
+#include "input/touch_router.h"
 
 namespace dg {
 
@@ -2230,21 +2231,9 @@ static bool nearPoint(float x,float z,float tx,float tz,float radius) {
     return dx*dx+dz*dz<=radius*radius;
 }
 
-static bool pointInSwapButton(float x,float y,float w,float h) {
-    const float cx=w*0.84f;
-    const float cy=h*0.25f;
-    const float radius=h*0.095f;
-    const float dx=x-cx, dy=y-cy;
-    return dx*dx+dy*dy<=radius*radius;
-}
 
-static bool pointInActionButton(float x,float y,float w,float h) {
-    const float cx=w*0.68f;
-    const float cy=h*0.78f;
-    const float radius=h*0.115f;
-    const float dx=x-cx, dy=y-cy;
-    return dx*dx+dy*dy<=radius*radius;
-}
+
+
 
 static bool performBodySwap() {
     if(!features.bodySystem || !features.worldStructures) return false;
@@ -2307,13 +2296,7 @@ static bool performContextAction() {
     return false;
 }
 
-static bool pointInFireButton(float x, float y, float w, float h) {
-    const float cx=w*0.84f;
-    const float cy=h*0.78f;
-    const float radius=h*0.135f;
-    const float dx=x-cx, dy=y-cy;
-    return dx*dx+dy*dy <= radius*radius;
-}
+
 
 static int closestPlayerPartOnRay(Vec3 start,Vec3 dir,float maxDistance);
 
@@ -2699,14 +2682,7 @@ static void drawMiniBot(const Mat4& vp) {
              0.42f,0.66f,0.78f);
 }
 
-static bool pointInMapButton(float x,float y,float w,float h) {
-    if(!features.navigationHud) return false;
-    const float cx=w*0.92f;
-    const float cy=h*0.12f;
-    const float radius=h*0.055f;
-    const float dx=x-cx, dy=y-cy;
-    return dx*dx+dy*dy<=radius*radius;
-}
+
 
 static void drawMinimap(const Mat4& hud,bool expanded) {
     const int chunkCount=WORLD_CHUNK_COUNT;
@@ -2905,13 +2881,7 @@ static void drawMinimalHud(const Mat4& hud) {
     }
 }
 
-static bool pointInAdminButton(float x,float y,float w,float h) {
-    const float x1=w*0.82f;
-    const float x2=w*0.98f;
-    const float y1=h*0.012f;
-    const float y2=h*0.082f;
-    return x>=x1 && x<=x2 && y>=y1 && y<=y2;
-}
+
 
 static int adminColumnCount() {
     return viewportW>=1050 ? 3 : 2;
@@ -4931,25 +4901,11 @@ static void frame() {
     drawHud();
 }
 
-static bool pointInCameraGesture(float x,float y,float w,float h) {
-    return x>w*0.46f && x<w*0.60f && y>h*0.08f && y<h*0.34f;
-}
 
-static bool pointInJumpButton(float x,float y,float w,float h) {
-    const float cx=w*0.52f;
-    const float cy=h*0.78f;
-    const float radius=h*0.105f;
-    const float dx=x-cx, dy=y-cy;
-    return dx*dx+dy*dy<=radius*radius;
-}
 
-static bool pointInAdminCommandButton(float x,float y,float w,float h){
-    const float x1=w*0.06f+12.0f;
-    const float x2=x1+142.0f;
-    const float y1=h*0.945f-48.0f;
-    const float y2=h*0.945f-14.0f;
-    return x>=x1&&x<=x2&&y>=y1&&y<=y2;
-}
+
+
+
 
 static void requestCommandConsole(){
     std::lock_guard<std::mutex> lock(commandMutex);
@@ -4958,82 +4914,93 @@ static void requestCommandConsole(){
 
 static void touch(int pointerId,int action,float x,float y,float w,float h) {
     if(action==ACTION_DOWN || action==ACTION_POINTER_DOWN) {
-        if(pointInAdminButton(x,y,w,h)) {
-            adminPointer=pointerId;
-            adminOpen=!adminOpen;
-            mapExpanded=false;
-            return;
-        }
+        const input::TouchFeatures inputFeatures{
+            features.player,
+            features.navigationHud,
+            features.camera,
+            features.playerJump,
+            features.playerMovement,
+            features.worldStructures,
+            features.playerCombat,
+            features.playerAim
+        };
+        const input::PointerAvailability pointers{
+            mapPointer<0,
+            cameraPointer<0,
+            jumpPointer<0,
+            movePointer<0,
+            swapPointer<0,
+            actionPointer<0,
+            firePointer<0,
+            aimPointer<0
+        };
+        const input::TouchUiState ui{adminOpen,mapExpanded};
+        const input::TouchTarget target=input::classifyTouchDown(
+            x,y,w,h,inputFeatures,pointers,ui);
 
-        if(adminOpen) {
-            if(pointInAdminCommandButton(x,y,w,h)) {
+        switch(target) {
+            case input::TouchTarget::ADMIN_TOGGLE:
+                adminPointer=pointerId;
+                adminOpen=!adminOpen;
+                mapExpanded=false;
+                return;
+            case input::TouchTarget::ADMIN_COMMAND:
                 requestCommandConsole();
                 adminOpen=false;
                 return;
+            case input::TouchTarget::ADMIN_FEATURE: {
+                const int feature=adminFeatureAtPoint(x,y);
+                if(feature>=0) toggleAdminFeature(feature);
+                return;
             }
-            const int feature=adminFeatureAtPoint(x,y);
-            if(feature>=0) toggleAdminFeature(feature);
-            return;
+            case input::TouchTarget::MAP:
+                mapPointer=pointerId;
+                mapExpanded=!mapExpanded;
+                return;
+            case input::TouchTarget::CAMERA:
+                cameraPointer=pointerId;
+                lastCameraY=y;
+                return;
+            case input::TouchTarget::JUMP:
+                jumpPointer=pointerId;
+                jumpRequested=true;
+                return;
+            case input::TouchTarget::MOVE: {
+                movePointer=pointerId;
+                const input::StickVector stick=input::movementStick(x,y,w,h);
+                joyX=stick.x;
+                joyY=stick.y;
+                return;
+            }
+            case input::TouchTarget::SWAP:
+                swapPointer=pointerId;
+                performBodySwap();
+                return;
+            case input::TouchTarget::ACTION:
+                actionPointer=pointerId;
+                actionPointerActive=performContextAction();
+                return;
+            case input::TouchTarget::FIRE:
+                firePointer=pointerId;
+                laserT=0.08f;
+                return;
+            case input::TouchTarget::AIM:
+                aimPointer=pointerId;
+                lastAimX=x;
+                lastAimY=y;
+                return;
+            case input::TouchTarget::NONE:
+                return;
         }
-
-        if(!features.player) return;
-
-        const bool leftZone=x<w*0.45f;
-
-        if(features.navigationHud && !leftZone &&
-           pointInMapButton(x,y,w,h) && mapPointer<0) {
-            mapPointer=pointerId;
-            mapExpanded=!mapExpanded;
-            return;
-        }
-
-        if(mapExpanded) return;
-
-        if(features.camera && !leftZone &&
-           pointInCameraGesture(x,y,w,h) && cameraPointer<0) {
-            cameraPointer=pointerId;
-            lastCameraY=y;
-        } else if(features.playerJump && !leftZone &&
-                  pointInJumpButton(x,y,w,h) && jumpPointer<0) {
-            jumpPointer=pointerId;
-            jumpRequested=true;
-        } else if(features.player && features.playerMovement &&
-                  leftZone && movePointer<0) {
-            movePointer=pointerId;
-            const float baseX=w*0.18f;
-            const float baseY=h*0.78f;
-            const float radius=h*0.20f;
-            joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
-            joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
-        } else if(features.worldStructures && !leftZone &&
-                   pointInSwapButton(x,y,w,h) && swapPointer<0) {
-            swapPointer=pointerId;
-            performBodySwap();
-        } else if(features.worldStructures && !leftZone &&
-                   pointInActionButton(x,y,w,h) && actionPointer<0) {
-            actionPointer=pointerId;
-            actionPointerActive=performContextAction();
-        } else if(features.playerCombat && !leftZone &&
-                   pointInFireButton(x,y,w,h) && firePointer<0) {
-            firePointer=pointerId;
-            laserT=0.08f;
-        } else if(features.playerAim && !leftZone && aimPointer<0) {
-            aimPointer=pointerId;
-            lastAimX=x;
-            lastAimY=y;
-        }
-        return;
     }
 
     if(adminOpen) return;
 
     if(action==ACTION_MOVE) {
         if(pointerId==movePointer && features.playerMovement) {
-            const float baseX=w*0.18f;
-            const float baseY=h*0.78f;
-            const float radius=h*0.20f;
-            joyX=std::clamp((x-baseX)/radius,-1.0f,1.0f);
-            joyY=std::clamp((y-baseY)/radius,-1.0f,1.0f);
+            const input::StickVector stick=input::movementStick(x,y,w,h);
+            joyX=stick.x;
+            joyY=stick.y;
         } else if(pointerId==cameraPointer && features.camera) {
             const float dy=y-lastCameraY;
             cameraDistance=std::clamp(cameraDistance+dy*0.018f,

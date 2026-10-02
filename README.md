@@ -213,10 +213,12 @@ boundary is now explicit:
 ```text
 app/src/main/cpp/
 ├── native-lib.cpp                 # JNI bridge, shared state, game loop
-└── console/
+├── console/
     ├── command_parser.h/.cpp      # pure tokenization, suggestions, coordinates
     ├── command_console.h/.cpp     # command execution contract and behavior
     └── command_console.inl        # legacy-state adapter and summon updates
+└── input/
+    └── touch_router.h/.cpp        # touch target priority and stick normalization
 ```
 
 `command_parser` is now a real Android-independent C++ module. It owns only
@@ -225,6 +227,15 @@ pure command logic and has host-side tests in `tests/command_parser_test.cpp`.
 contract. `command_console.inl` only adapts the legacy game globals to that
 contract and retains summon simulation until the broader game state migration
 is complete.
+
+Touch routing follows the same pattern: `touch_router` owns hit-region priority,
+feature gating, pointer availability checks, and virtual-stick normalization.
+The native loop applies the selected target to gameplay state. Its host-side
+tests live in `tests/touch_router_test.cpp` and run with:
+
+```bash
+tests/run_touch_router_tests.sh
+```
 
 Run the parser tests with:
 

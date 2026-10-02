@@ -5,6 +5,7 @@ add_library(dgcore SHARED
     native-lib.cpp
     console/command_parser.cpp
     console/command_console.cpp
+    input/touch_router.cpp
 )
 
 target_compile_features(dgcore PRIVATE cxx_std_17)
