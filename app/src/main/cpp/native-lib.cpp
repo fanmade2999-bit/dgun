@@ -3269,7 +3269,9 @@ static bool saveGame() {
     }
     out.close();
 
-    std::remove(path.c_str());
+    // POSIX/Android rename replaces the destination in one filesystem
+    // operation, keeping the save update atomic-ish instead of deleting the
+    // valid save before the replacement is ready.
     if(std::rename((path+".tmp").c_str(),path.c_str())!=0) {
         std::remove((path+".tmp").c_str());
         return false;
