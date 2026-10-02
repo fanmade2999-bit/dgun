@@ -28,6 +28,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        NativeBridge.save();
         if (surface != null) surface.onPause();
         super.onPause();
     }
@@ -93,7 +94,7 @@ public final class MainActivity extends Activity {
         @Override public void onSurfaceCreated(
                 javax.microedition.khronos.opengles.GL10 gl,
                 javax.microedition.khronos.egl.EGLConfig config) {
-            NativeBridge.init();
+            NativeBridge.init(getFilesDir().getAbsolutePath());
         }
 
         @Override public void onSurfaceChanged(
@@ -110,7 +111,8 @@ public final class MainActivity extends Activity {
     private static final class NativeBridge {
         static { System.loadLibrary("dgcore"); }
 
-        static native void init();
+        static native void init(String savePath);
+        static native void save();
         static native void resize(int width, int height);
         static native void frame();
         static native void touch(
