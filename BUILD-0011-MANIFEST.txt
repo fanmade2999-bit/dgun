@@ -1,0 +1,54 @@
+BUILD: 0011
+APP ID: com.fanmade.dg
+VERSION: 0.1.1
+VERSION CODE: 11
+
+INTEGRATED SYSTEMS
+- Movement + independent aim + dedicated fire.
+- Multi-touch control roles.
+- Enemy pursuit/attack and per-part damage.
+- Chassis integrity and reliable death.
+- Visible laser with obstacle-aware penetration.
+- Physical wreck persistence during the prototype session.
+- Body pool with multiple assembled chassis.
+- Base body swapping.
+- Recovery bot fallback when assembled bodies are exhausted.
+- Part-dependent salvage.
+- SCRAP/CIRCUIT resource economy.
+- Discovery facility with UNKNOWN EQUIPMENT pod.
+- Location-based equipment identification.
+- LANCE equipment progression.
+- Persistent landmark boss.
+- Deterministic procedural terrain.
+- 1024 × 1024 toroidal world.
+- 32 × 32 chunk torus.
+- 16 × 16 tiles per chunk.
+- Live X/Y/Z coordinates.
+- Current chunk + local tile coordinates.
+- Compact minimap.
+- Expandable full-world chunk map.
+- Autonomous ecosystem independent of player location.
+- Grazers, scavengers, hunters.
+- Hunger, thirst, energy, fear and age.
+- Food and water resources per chunk.
+- Shelter and danger state per chunk.
+- Global regeneration affected by rain.
+- Predation, starvation, reproduction and corpses.
+- World day/night ecological cycle.
+- Global rain/weather clock.
+- Nearby rain visual effect.
+- Ecosystem event feedback on HUD.
+
+ECOLOGY TEST
+- Start the app and note the ECO population/cycle readout.
+- Leave an ecosystem group and travel far away.
+- Wait across day/night changes and rain.
+- Return to the old area and compare positions/population/corpses.
+- Open the expanded MAP and observe population/resource differences between chunks.
+- Confirm the player is not needed for births, predation, scavenging, starvation or resource regeneration.
+- Confirm rain affects the world even when the player is far from the area receiving it.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA + PHYSICAL DEVICE TEST
