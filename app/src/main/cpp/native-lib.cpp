@@ -417,6 +417,7 @@ enum EcosystemKind : uint8_t {
 struct EcoActor {
     bool alive=false;
     int kind=ECO_GRAZER;
+    int groupId=-1;
     float x=0.0f, z=0.0f;
     float yaw=0.0f;
     float hp=1.0f;
@@ -428,6 +429,9 @@ struct EcoActor {
     float corpseTimer=0.0f;
     float fear=0.0f;
     float thirst=0.0f;
+    float alert=0.0f;
+    float loyalty=0.5f;
+    float denX=0.0f, denZ=0.0f;
     int target=-1;
     int homeChunkX=0;
     int homeChunkZ=0;
@@ -440,12 +444,34 @@ static EcoActor ecoActors[MAX_ECO_ACTORS]{};
 static float ecosystemClock=0.0f;
 static float ecosystemAccumulator=0.0f;
 static int ecosystemPopulation=0;
+
+static constexpr int ECO_EVENT_HISTORY=16;
+struct EcoEventRecord {
+    int type=0; // 1 birth, 2 predation, 3 death, 4 scavenging, 5 cycle
+    int kind=0;
+    int chunkX=0;
+    int chunkZ=0;
+    float stamp=0.0f;
+};
+static EcoEventRecord ecoEventHistory[ECO_EVENT_HISTORY]{};
+static int ecoEventWrite=0;
+
 static int ecosystemBirths=0;
 static int ecosystemDeaths=0;
 static int ecosystemKills=0;
 static int ecosystemLastEvent=0;
 static float ecosystemLastEventTimer=0.0f; // 1=birth, 2=predation, 3=starvation, 4=scavenge
 static int ecosystemCycle=0;
+
+static void recordEcoEvent(int type,int kind,float x,float z) {
+    EcoEventRecord& e=ecoEventHistory[ecoEventWrite];
+    e.type=type;
+    e.kind=kind;
+    e.chunkX=chunkCoord(x);
+    e.chunkZ=chunkCoord(z);
+    e.stamp=ecosystemClock;
+    ecoEventWrite=(ecoEventWrite+1)%ECO_EVENT_HISTORY;
+}
 
 static float playerHitFlash=0.0f;
 static float enemyHitFlash=0.0f;
@@ -866,9 +892,16 @@ static void ecoSpawnActor(int slot,int kind,uint32_t seed,float x,float z) {
     a.thirst=0.08f+float((seed>>10)&31u)/260.0f;
     a.energy=0.65f+float((seed>>13)&31u)/100.0f;
     a.fear=0.0f;
+    a.alert=0.0f;
+    a.loyalty=0.35f+float((seed>>17)&63u)/100.0f;
+    a.groupId=(kind==ECO_HUNTER)?int((seed>>12)&3u):int((seed>>18)&7u);
     a.age=5.0f+float((seed>>18)&31u);
     a.homeChunkX=chunkCoord(a.x);
     a.homeChunkZ=chunkCoord(a.z);
+    a.denX=wrapWorld((float(a.homeChunkX)+0.5f)*CHUNK_WORLD_SIZE
+                     +float(int((seed>>21)&15u)-7)*1.2f);
+    a.denZ=wrapWorld((float(a.homeChunkZ)+0.5f)*CHUNK_WORLD_SIZE
+                     +float(int((seed>>25)&15u)-7)*1.2f);
     a.brain=0.4f+float((seed>>23)&31u)/30.0f;
     ecosystemPopulation++;
 }
@@ -883,6 +916,8 @@ static void initializeEcosystem() {
     ecosystemLastEvent=0;
     ecosystemLastEventTimer=0.0f;
     ecosystemCycle=0;
+    ecoEventWrite=0;
+    for(int i=0;i<ECO_EVENT_HISTORY;i++) ecoEventHistory[i]=EcoEventRecord{};
 
     for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) {
         const int cx=(i%WORLD_CHUNK_COUNT)-WORLD_CHUNK_COUNT/2;
@@ -1021,6 +1056,7 @@ static void ecoKillActor(int slot) {
     ecosystemDeaths++;
     ecosystemLastEvent=3;
     ecosystemLastEventTimer=2.5f;
+    recordEcoEvent(3,a.kind,a.x,a.z);
 }
 
 static void ecoReproduce(int aSlot,int bSlot) {
@@ -1038,12 +1074,18 @@ static void ecoReproduce(int aSlot,int bSlot) {
     ecoSpawnActor(slot,a.kind,seed,wrapWorld((a.x+b.x)*0.5f+ox),wrapWorld((a.z+b.z)*0.5f+oz));
     ecoActors[slot].age=0.0f;
     ecoActors[slot].hunger=0.08f;
+    ecoActors[slot].thirst=0.06f;
     ecoActors[slot].energy=0.55f;
+    ecoActors[slot].groupId=a.groupId;
+    ecoActors[slot].loyalty=std::clamp((a.loyalty+b.loyalty)*0.5f,0.25f,0.95f);
+    ecoActors[slot].denX=wrapWorld((a.denX+b.denX)*0.5f);
+    ecoActors[slot].denZ=wrapWorld((a.denZ+b.denZ)*0.5f);
     a.breedCooldown=18.0f;
     b.breedCooldown=18.0f;
     ecosystemBirths++;
     ecosystemLastEvent=1;
     ecosystemLastEventTimer=2.5f;
+    recordEcoEvent(1,a.kind,a.x,a.z);
 }
 
 static void simulateEcosystemTick(float dt) {
@@ -1135,6 +1177,7 @@ static void simulateEcosystemTick(float dt) {
                     a.fear=std::max(0.0f,a.fear-0.08f*dt);
                     if(prey.hp<=0.0f) {
                         ecosystemKills++;
+                        recordEcoEvent(2,prey.kind,prey.x,prey.z);
                         ecoKillActor(a.target);
                         ecosystemLastEvent=2;
                         ecosystemLastEventTimer=2.5f;
@@ -1193,6 +1236,7 @@ static void simulateEcosystemTick(float dt) {
                     ecoActors[corpse].corpseTimer=std::max(0.0f,ecoActors[corpse].corpseTimer-dt*3.0f);
                     ecosystemLastEvent=4;
                     ecosystemLastEventTimer=2.5f;
+                    recordEcoEvent(4,a.kind,a.x,a.z);
                 }
             } else {
                 a.yaw+=std::sin(ecosystemClock*0.18f+seedPhase)*dt*0.8f;
