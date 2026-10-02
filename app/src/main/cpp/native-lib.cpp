@@ -1236,6 +1236,23 @@ static void simulateEcosystemTick(float dt) {
                 a.fear=std::min(1.0f,
                     a.fear+dt*(0.26f+worldNoise*0.60f));
             }
+
+            // Alarm propagation: one creature noticing a disturbance can warn
+            // nearby members of its own group. This creates emergent reactions
+            // without creating a player-centric scripted event.
+            for(int j=0;j<MAX_ECO_ACTORS;j++) {
+                if(j==i || !ecoActors[j].alive ||
+                   ecoActors[j].kind!=a.kind ||
+                   ecoActors[j].groupId!=a.groupId) continue;
+                const float gx=wrappedDelta(a.x,ecoActors[j].x);
+                const float gz=wrappedDelta(a.z,ecoActors[j].z);
+                if(gx*gx+gz*gz<49.0f) {
+                    ecoActors[j].alert=std::min(1.0f,ecoActors[j].alert+dt*0.35f);
+                    if(ecoActors[j].kind!=ECO_HUNTER) {
+                        ecoActors[j].fear=std::min(1.0f,ecoActors[j].fear+dt*0.22f);
+                    }
+                }
+            }
         }
         if(night && currentChunk.shelter>0.68f) {
             a.energy=std::min(1.0f,a.energy+dt*0.014f);
