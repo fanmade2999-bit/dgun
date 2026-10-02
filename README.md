@@ -84,6 +84,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Local HUD ecology reports the current chunk's population, food and water rather than a player-centered quest state.
 - Creatures maintain groups, personal dens, loyalty, alertness and condition across their session.
 - Wildlife reacts to the player's physical presence and weapon noise without being spawned around the player.
+- Alarm can propagate between nearby members of the same creature group, allowing one animal to alert others.
 - Non-hunter wildlife can flee from a nearby player or a loud laser disturbance.
 - The player's laser can hit and kill ecosystem actors, creating a world event that other creatures can react to.
 - Unattended mech wrecks are now scavengeable by autonomous scavengers, so salvage can decay over time.
@@ -103,6 +104,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Tapping **MAP** expands it into the full 32 × 32 chunk world map.
 - The expanded map highlights the current chunk and shows base/facility/boss positions.
 - Recent autonomous ecosystem events appear as fading strategic-map traces, including player-caused kills.
+- Group alarm propagation makes local disturbances spread through the ecosystem naturally.
 - Local ecology remains visible without turning the map into a player-centric quest tracker.
 - Recent autonomous ecosystem events are shown as temporary activity markers on the expanded map.
 
