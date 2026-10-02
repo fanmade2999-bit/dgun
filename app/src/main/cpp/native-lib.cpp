@@ -952,6 +952,8 @@ static EcoChunkState& ecoChunkAt(float x,float z) {
     return ecoChunks[chunkStateIndex(chunkCoord(x),chunkCoord(z))];
 }
 
+static Vec3 ecoChunkCenterFromPacked(int packed);
+
 static float ecoChunkSuitability(int cx,int cz) {
     const EcoChunkState& chunk=ecoChunks[chunkStateIndex(cx,cz)];
     return chunk.food*1.15f + chunk.water*0.70f + chunk.shelter*0.20f - chunk.danger*0.35f;
