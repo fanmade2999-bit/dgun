@@ -4767,6 +4767,8 @@ static std::vector<std::string> commandSuggestions(const std::string& text){
     const auto p=splitCommand(text);
 
     if(p.size()==1&&!trailing){
+        if(p[0]=="summon"||p[0]=="/summon")
+            return {"/summon npc","/summon boss"};
         for(const auto& c:commands)if(c.rfind(text,0)==0)out.push_back(c);
         return out;
     }
