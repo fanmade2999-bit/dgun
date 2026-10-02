@@ -2,72 +2,6 @@
 // This file is included into native-lib.cpp while the legacy shared game state
 // is being migrated behind explicit subsystem interfaces.
 
-static std::vector<std::string> splitCommand(const std::string& line){
-    std::vector<std::string> out;
-    std::string token;
-    for(char c:line){
-        if(c==' '||c=='\t'||c=='\n'){
-            if(!token.empty()){out.push_back(token);token.clear();}
-        } else token.push_back(c);
-    }
-    if(!token.empty())out.push_back(token);
-    return out;
-}
-
-static std::vector<std::string> commandSuggestions(const std::string& text){
-    const std::vector<std::string> commands={"/summon","/list","/kill","/tp","/clear"};
-    const std::vector<std::string> npcs={"survivor","mechanic","scientist","trader","scout","medic","ranger"};
-    const std::vector<std::string> bosses={"samurai","tyrant","dreadnought","raptor","behemoth","sentinel"};
-    std::vector<std::string> out;
-    if(text.empty()||text=="/")return commands;
-
-    const bool trailing=!text.empty()&&(text.back()==' '||text.back()=='\t');
-    const auto p=splitCommand(text);
-
-    if(p.size()==1&&!trailing){
-        if(p[0]=="summon"||p[0]=="/summon")
-            return {"/summon npc","/summon boss"};
-        for(const auto& c:commands)if(c.rfind(text,0)==0)out.push_back(c);
-        return out;
-    }
-
-    if(!p.empty()&&(p[0]=="summon"||p[0]=="/summon")){
-        if(p.size()<=1)return {"/summon npc","/summon boss"};
-        const std::string& type=p[1];
-        if((type=="npc"||type=="boss")&&p.size()==2){
-            if(trailing || p[1]==type){
-                const auto& names=(type=="boss")?bosses:npcs;
-                for(const auto& n:names)out.push_back("/summon "+type+" "+n);
-                return out;
-            }
-        }
-        if(p.size()>=3){
-            const auto& names=(type=="boss")?bosses:npcs;
-            for(const auto& n:names)
-                if(n.rfind(p[2],0)==0)out.push_back("/summon "+type+" "+n);
-        } else if(p.size()==2){
-            if(type.rfind("npc",0)==0)out.push_back("/summon npc");
-            if(type.rfind("boss",0)==0)out.push_back("/summon boss");
-        }
-        return out;
-    }
-
-    if((p[0]=="kill"||p[0]=="/kill")&&p.size()<=1)
-        return {"/kill all","/kill npcs","/kill bosses"};
-    if((p[0]=="tp"||p[0]=="/tp")&&p.size()<=1)
-        return {"/tp ~ ~","/tp 0 0","/tp 10 10"};
-    return out;
-}
-
-static bool parseCommandFloat(const std::string& token,float reference,float& value){
-    try{
-        if(token=="~")value=reference;
-        else if(!token.empty()&&token[0]=='~')value=reference+std::stof(token.substr(1));
-        else value=std::stof(token);
-        return true;
-    }catch(...){return false;}
-}
-
 static bool summonEntity(int kind,float x,float z,std::string& result){
     const bool boss=summonKindIsBoss(kind);
     if(boss)features.summonedBosses=true;
@@ -99,7 +33,7 @@ static bool summonEntity(int kind,float x,float z,std::string& result){
 }
 
 static std::string executeAdminCommand(const std::string& raw){
-    const auto p=splitCommand(raw);
+    const auto p=console::splitCommand(raw);
     if(p.empty())return {};
     std::string cmd=p[0];
     if(!cmd.empty()&&cmd[0]=='/')cmd=cmd.substr(1);
@@ -120,8 +54,8 @@ static std::string executeAdminCommand(const std::string& raw){
             x=px+std::cos(angle)*radius;
             z=pz+std::sin(angle)*radius;
         }
-        if((int)p.size()>coord&&!parseCommandFloat(p[coord],px,x))return "BAD X";
-        if((int)p.size()>coord+1&&!parseCommandFloat(p[coord+1],pz,z))return "BAD Z";
+        if((int)p.size()>coord&&!console::parseCommandFloat(p[coord],px,x))return "BAD X";
+        if((int)p.size()>coord+1&&!console::parseCommandFloat(p[coord+1],pz,z))return "BAD Z";
         std::string result;
         summonEntity(kind,x,z,result);
         return result;
@@ -159,7 +93,7 @@ static std::string executeAdminCommand(const std::string& raw){
     if(cmd=="tp"){
         if(p.size()<3)return "USAGE: /tp <x> <z>";
         float x,z;
-        if(!parseCommandFloat(p[1],px,x)||!parseCommandFloat(p[2],pz,z))
+        if(!console::parseCommandFloat(p[1],px,x)||!console::parseCommandFloat(p[2],pz,z))
             return "BAD COORDS";
         px=wrapWorld(x);
         pz=wrapWorld(z);

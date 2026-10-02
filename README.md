@@ -214,15 +214,21 @@ boundary is now explicit:
 app/src/main/cpp/
 ├── native-lib.cpp                 # JNI bridge, shared state, game loop
 └── console/
-    └── command_console.inl       # command parsing, execution, summon updates
+    ├── command_parser.h/.cpp      # pure tokenization, suggestions, coordinates
+    └── command_console.inl        # game-state command execution and summon updates
 ```
 
-`command_console.inl` is intentionally an internal implementation seam: it is
-included by `native-lib.cpp` while the legacy shared state is still being
-replaced with explicit subsystem interfaces. This lets each extraction compile
-independently without changing gameplay behavior. Future passes can convert
-this seam into a real `command_console.cpp` module once the shared state API is
-defined.
+`command_parser` is now a real Android-independent C++ module. It owns only
+pure command logic and has host-side tests in `tests/command_parser_test.cpp`.
+`command_console.inl` remains an internal implementation seam for game-state
+mutation: it is included by `native-lib.cpp` while the legacy shared state is
+still being replaced with explicit subsystem interfaces.
+
+Run the parser tests with:
+
+```bash
+tests/run_command_parser_tests.sh
+```
 
 Persistent saves for ecosystem state, more species, richer aggregate food-chain interactions, births across multiple generations, ecosystem interaction with world facilities/ruins, richer procedural terrain/biomes, more boss variants, and deeper salvage/component inventories remain later systems.
 

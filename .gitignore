@@ -1,0 +1,8 @@
+# Android/Gradle generated files
+.gradle/
+app/.cxx/
+app/build/
+local.properties
+
+# Host-side parser test output
+.test-build/

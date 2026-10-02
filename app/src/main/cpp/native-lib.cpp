@@ -13,6 +13,8 @@
 #include <memory>
 #include <mutex>
 
+#include "console/command_parser.h"
+
 namespace dg {
 
 constexpr float PI = 3.14159265358979323846f;
@@ -5133,7 +5135,7 @@ Java_com_fanmade_dg_MainActivity_00024NativeBridge_getCommandSuggestions(JNIEnv*
         const char* chars=env->GetStringUTFChars(text,nullptr);
         if(chars){input=chars;env->ReleaseStringUTFChars(text,chars);}
     }
-    const auto suggestions=dg::commandSuggestions(input);
+    const auto suggestions=dg::console::commandSuggestions(input);
     std::string joined;
     for(size_t i=0;i<suggestions.size();i++){if(i)joined.push_back('\n');joined+=suggestions[i];}
     return env->NewStringUTF(joined.c_str());
