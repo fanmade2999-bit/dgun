@@ -629,6 +629,35 @@ static void drawProceduralTerrain(const Mat4& vp) {
     }
 }
 
+static void drawRain(const Mat4& vp) {
+    const float rain=ecoRainIntensity(ecosystemClock);
+    if(rain<0.40f) return;
+
+    constexpr int DROPS=54;
+    float verts[DROPS*2*3]{};
+    int n=0;
+    const int baseTx=floorTile(px);
+    const int baseTz=floorTile(pz);
+
+    for(int i=0;i<DROPS;i++) {
+        const uint32_t h=worldHash(baseTx+i*3,baseTz-i*5)^uint32_t(i*0x9E3779B9u);
+        const float ox=(float(int((h>>4)&255u))-127.0f)/127.0f*13.0f;
+        const float oz=(float(int((h>>12)&255u))-127.0f)/127.0f*10.0f;
+        const float startY=3.8f+float((h>>20)&31u)*0.035f;
+        const float lenDrop=0.35f+rain*0.65f;
+
+        const float x=px+ox;
+        const float z=pz+oz;
+        const float dx=0.05f+rain*0.04f;
+        const float dy=-lenDrop;
+
+        verts[n++]=x;        verts[n++]=startY;      verts[n++]=z;
+        verts[n++]=x+dx;     verts[n++]=startY+dy;   verts[n++]=z+0.02f;
+    }
+
+    drawLines(vp,verts,n/3,0.38f,0.58f,0.72f,0.20f+rain*0.34f);
+}
+
 static void drawChunkBorders(const Mat4& vp) {
     const int centerChunkX=chunkCoord(px);
     const int centerChunkZ=chunkCoord(pz);
@@ -1106,9 +1135,9 @@ static void simulateEcosystemTick(float dt) {
                     a.fear=std::max(0.0f,a.fear-0.08f*dt);
                     if(prey.hp<=0.0f) {
                         ecosystemKills++;
+                        ecoKillActor(a.target);
                         ecosystemLastEvent=2;
                         ecosystemLastEventTimer=2.5f;
-                        ecoKillActor(a.target);
                         a.target=-1;
                     }
                 }
@@ -1923,8 +1952,16 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
     drawLines(hud,outline,8,0.92f,0.92f,0.70f,0.85f);
 
     char mapTitle[32]{};
+    const EcoChunkState& currentEcoChunk=ecoChunkAt(px,pz);
     std::snprintf(mapTitle,sizeof(mapTitle),"MAP C%d,%d",centerX,centerZ);
     drawText2D(hud,mapTitle,x0,y0-18.0f,2.7f,0.86f,0.92f,0.96f,0.95f);
+
+    char chunkLife[32]{};
+    std::snprintf(chunkLife,sizeof(chunkLife),"FOOD%d WATER%d",
+                  int(std::round(currentEcoChunk.food*9.0f)),
+                  int(std::round(currentEcoChunk.water*9.0f)));
+    drawText2D(hud,chunkLife,x0,y0+size+16.0f,2.15f,
+               0.55f,0.74f,0.68f,0.84f);
     drawText2D(hud,"MAP",viewportW*0.88f,viewportH*0.105f,3.0f,
                1.0f,1.0f,1.0f,0.95f);
 }
@@ -2650,6 +2687,13 @@ static void frame() {
     update(dt);
 
     glViewport(0,0,viewportW,viewportH);
+
+    const bool night=ecoIsNight(ecosystemClock);
+    const float rain=ecoRainIntensity(ecosystemClock);
+    const float skyR=night?0.010f:(0.025f-0.004f*rain);
+    const float skyG=night?0.016f:(0.035f-0.008f*rain);
+    const float skyB=night?0.030f:(0.050f-0.010f*rain);
+    glClearColor(skyR,skyG,skyB,1.0f);
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     glUseProgram(program);
 
@@ -2670,6 +2714,7 @@ static void frame() {
     drawGrid(vp);
     drawArenaBlocks(vp);
     drawTestWorldStructures(vp);
+    drawRain(vp);
     drawEcosystem(vp);
     if(wreck.active) drawWreck(vp);
     if(enemyRespawn<=0.0f) drawEnemy(vp);
