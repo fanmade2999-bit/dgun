@@ -1,0 +1,51 @@
+BUILD: 0021
+APP ID: com.fanmade.dg
+VERSION: 0.2.1
+VERSION CODE: 21
+
+NEW IN THIS BUILD
+- Added ADMIN -> CMD command console.
+- Android uses a real text field and soft keyboard for command entry.
+- Suggestions update while typing.
+- Commands are queued from the Android UI and executed on the game/update thread.
+
+COMMANDS
+- /summon npc <name> [x] [z]
+- /summon boss <name> [x] [z]
+- /summon <name> [x] [z]
+- /list
+- /kill <id|all|npcs|bosses>
+- /clear
+- /tp <x> <z>
+- Coordinates support ~ relative notation.
+
+NPCS
+- survivor
+- mechanic
+- scientist
+- trader
+- scout
+- medic
+- ranger
+
+BOSSES
+- samurai
+- tyrant
+- dreadnought
+- raptor
+- behemoth
+- sentinel
+
+SUMMON SYSTEM
+- 32 runtime summon slots.
+- NPCs have distinct visual variants and local wandering behavior.
+- Bosses are larger moving actors that pursue the player.
+- Summoned NPCs/bosses are independent from the legacy enemy/boss slots.
+- /list reports active counts.
+- Player laser can damage summoned actors when COMBAT is enabled.
+- Summoned actors are currently session-scoped and are not saved.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA
