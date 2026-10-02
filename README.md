@@ -1,4 +1,19 @@
-# DG Build 0017
+# DG Build 0018
+
+> Current development slice: player + procedural terrain only. Combat, enemies, ecosystem, structures and navigation are switchable but disabled by default.
+
+## Build 0018 — traversal foundation
+- Central `FeatureFlags` switchboard keeps major systems independently enable/disable-able.
+- The frame loop is split into player, world, transient and weapon-resolution systems instead of one monolithic update path.
+- Enemy, boss, ecosystem, weather, structures, wrecks, combat and navigation HUD are disabled in the current prototype slice.
+- Player respawn flow is isolated from combat/world systems and returns the player to the base spawn point.
+- Third-person camera distance is adjustable with an upper-screen vertical swipe.
+- Jump input and vertical player physics are isolated from horizontal movement.
+- Terrain-only HUD is reduced to movement, camera, jump and coordinates.
+
+## Previous build history
+
+
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
