@@ -215,6 +215,12 @@ struct EcoChunkState {
     float shelter=0.0f;
     float danger=0.0f;
     int population=0;
+
+    // Population LOD: creatures outside the active simulation bubble are
+    // represented as counts instead of consuming individual actor slots.
+    // This lets the 1024x1024 world contain a much larger living population
+    // without making every creature a full real-time object.
+    uint16_t dormant[3]{};
 };
 
 static EcoChunkState ecoChunks[WORLD_CHUNK_STATE_COUNT]{};
@@ -944,6 +950,9 @@ static void initializeEcosystem() {
         chunk.shelter=0.20f+float((h>>15)&63u)/100.0f;
         chunk.danger=0.08f+float((h>>21)&31u)/180.0f;
         chunk.population=0;
+        chunk.dormant[ECO_GRAZER]=2+int((h>>3)&3u);
+        chunk.dormant[ECO_SCAVENGER]=1+int((h>>8)&2u);
+        chunk.dormant[ECO_HUNTER]=int((h>>13)&1u);
     }
 
     for(int i=0;i<MAX_ECO_ACTORS;i++) ecoActors[i]=EcoActor{};
@@ -991,6 +1000,115 @@ static int ecoChunkCapacity(int cx,int cz,int kind) {
     const float quality=0.35f+chunk.food*0.55f+chunk.water*0.30f+
                         chunk.shelter*0.22f-chunk.danger*0.30f;
     return std::clamp(int(std::round(base*quality)),1,8);
+}
+
+static int ecoDormantCapacity(int kind,const EcoChunkState& chunk) {
+    const float base=(kind==ECO_GRAZER)?18.0f:
+                     ((kind==ECO_SCAVENGER)?10.0f:5.0f);
+    const float quality=0.25f+chunk.food*0.60f+chunk.water*0.35f+
+                        chunk.shelter*0.12f-chunk.danger*0.40f;
+    return std::clamp(int(std::round(base*quality)),1,24);
+}
+
+static void ecoSimulateDormantPopulation(float dt) {
+    // This is deliberately aggregate rather than actor-by-actor. It models
+    // births, starvation and pressure in chunks the player cannot currently
+    // see, while active actors continue to use the detailed simulation.
+    for(int i=0;i<WORLD_CHUNK_STATE_COUNT;i++) {
+        EcoChunkState& chunk=ecoChunks[i];
+
+        const float quality=std::clamp(
+            chunk.food*0.62f+chunk.water*0.28f+chunk.shelter*0.10f-
+            chunk.danger*0.45f,0.0f,1.0f);
+
+        const float birthPulse=dt*(0.004f+quality*0.012f);
+        const float deathPulse=dt*(0.002f+(1.0f-quality)*0.018f);
+
+        for(int kind=0;kind<3;kind++) {
+            const int cap=ecoDormantCapacity(kind,chunk);
+            float value=float(chunk.dormant[kind]);
+            if(value<cap) value=std::min(float(cap),value+birthPulse);
+            if(value>cap) value=std::max(float(cap),value-deathPulse);
+
+            // Severe ecological failure can remove dormant population faster.
+            if(chunk.food<0.08f && kind==ECO_GRAZER)
+                value=std::max(0.0f,value-dt*0.08f);
+            if(chunk.water<0.05f)
+                value=std::max(0.0f,value-dt*0.035f);
+            if(chunk.danger>0.55f && kind==ECO_HUNTER)
+                value=std::max(0.0f,value-dt*0.018f);
+
+            chunk.dormant[kind]=uint16_t(std::clamp(
+                int(std::round(value)),0,cap));
+        }
+    }
+}
+
+static void ecoDemoteDistantActors() {
+    constexpr float ACTIVE_RADIUS=150.0f;
+
+    for(int i=0;i<MAX_ECO_ACTORS;i++) {
+        EcoActor& a=ecoActors[i];
+        if(!a.alive) continue;
+
+        if(ecoDistanceTo(a.x,a.z,px,pz)<=ACTIVE_RADIUS) continue;
+
+        EcoChunkState& chunk=ecoChunkAt(a.x,a.z);
+        const int kind=std::clamp(a.kind,0,2);
+        const int cap=ecoDormantCapacity(kind,chunk);
+
+        if(int(chunk.dormant[kind])<cap) {
+            chunk.dormant[kind]++;
+        } else if(a.kind==ECO_HUNTER && chunk.food>0.30f) {
+            // Hunters have a lower carrying capacity; if their aggregate
+            // bucket is full, simply keep this actor active for now.
+            continue;
+        }
+
+        a.alive=false;
+        a.hp=0.0f;
+        a.target=-1;
+        a.corpseTimer=0.0f;
+        ecosystemPopulation=std::max(0,ecosystemPopulation-1);
+    }
+}
+
+static void ecoPromoteNearbyPopulation() {
+    constexpr int RADIUS_CHUNKS=2;
+
+    const int pcx=chunkCoord(px);
+    const int pcz=chunkCoord(pz);
+
+    for(int dz=-RADIUS_CHUNKS;dz<=RADIUS_CHUNKS;dz++) {
+        for(int dx=-RADIUS_CHUNKS;dx<=RADIUS_CHUNKS;dx++) {
+            const int cx=pcx+dx;
+            const int cz=pcz+dz;
+            EcoChunkState& chunk=ecoChunks[chunkStateIndex(cx,cz)];
+
+            for(int kind=0;kind<3;kind++) {
+                if(chunk.dormant[kind]==0) continue;
+
+                const int slot=ecoFindEmptySlot();
+                if(slot<0 || ecosystemPopulation>=MAX_ECO_ACTORS) return;
+
+                const uint32_t h=chunkHash(cx,cz) ^
+                    (uint32_t(kind)*0x9E3779B9u) ^
+                    uint32_t(ecosystemCycle*0x85EBCA6Bu) ^
+                    uint32_t(slot*0xC2B2AE35u);
+
+                const float ox=(float(int((h>>4)&255u))-127.0f)/255.0f*
+                               CHUNK_WORLD_SIZE*0.42f;
+                const float oz=(float(int((h>>12)&255u))-127.0f)/255.0f*
+                               CHUNK_WORLD_SIZE*0.42f;
+
+                ecoSpawnActor(slot,kind,h,
+                    wrapWorld((float(cx)+0.5f)*CHUNK_WORLD_SIZE+ox),
+                    wrapWorld((float(cz)+0.5f)*CHUNK_WORLD_SIZE+oz));
+
+                chunk.dormant[kind]--;
+            }
+        }
+    }
 }
 
 static int ecoFindWaterChunk(int slot) {
@@ -1205,6 +1323,10 @@ static void simulateEcosystemTick(float dt) {
         ecosystemLastEvent=5;
         ecosystemLastEventTimer=2.5f;
     }
+
+    ecoSimulateDormantPopulation(dt);
+    ecoDemoteDistantActors();
+    ecoPromoteNearbyPopulation();
 
     for(int i=0;i<MAX_ECO_ACTORS;i++) {
         EcoActor& a=ecoActors[i];
