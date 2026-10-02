@@ -1,4 +1,4 @@
-# DG Build 0011
+# DG Build 0012
 
 Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 
@@ -73,6 +73,13 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Creatures have hunger, thirst, energy and fear needs and react to local conditions.
 - Hunters increase local danger; grazers become more cautious and move differently at night.
 - Predation and starvation are tracked as separate ecosystem events.
+- Individual creatures now have persistent group identity, loyalty, alertness, and a personal den/home location for the session.
+- Hunters can share prey targets with trusted pack members.
+- Grazers maintain loose herd cohesion based on group identity.
+- Creatures actively seek water when thirsty.
+- Crowded populations migrate toward better chunks instead of remaining packed forever.
+- Reproduction is constrained by local ecological carrying capacity.
+- Recent births, hunts, deaths and scavenging are retained as world-event records.
 
 ### World cycle and weather
 - The autonomous world has a 240-second ecological cycle.
@@ -80,6 +87,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - Rain intensity is generated from world time rather than from the player.
 - Rain replenishes world water and accelerates food recovery.
 - Visible rain is rendered locally around the player, but the underlying weather clock is global.
+- Autonomous creatures have night/rest routines tied to shelter and personal dens.
 
 ### Coordinates + expandable minimap
 - Live **X/Y/Z** coordinates are displayed.
@@ -87,6 +95,7 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 - A compact minimap shows nearby chunks and persistent landmark markers.
 - Tapping **MAP** expands it into the full 32 × 32 chunk world map.
 - The expanded map highlights the current chunk and shows base/facility/boss positions.
+- Recent autonomous ecosystem events are shown as temporary activity markers on the expanded map.
 
 ### Landmark boss + equipment progression
 - A large persistent boss now lives at a fixed world landmark.
