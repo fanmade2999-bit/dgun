@@ -590,6 +590,7 @@ static void initGL() {
     glClearColor(0.025f,0.035f,0.05f,1.0f);
     initializeBodyPool();
     initializeEcosystem();
+    loadGame();
 }
 
 static void drawCube(
