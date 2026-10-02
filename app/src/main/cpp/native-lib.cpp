@@ -3669,6 +3669,10 @@ static void toggleAdminFeature(int index) {
             swapPointer=-1;
             actionPointer=-1;
             actionPointerActive=false;
+        } else if(def.member==&FeatureFlags::summonedNpcs) {
+            for(auto& e:summonedEntities) if(!summonKindIsBoss(e.kind)) e.active=false;
+        } else if(def.member==&FeatureFlags::summonedBosses) {
+            for(auto& e:summonedEntities) if(summonKindIsBoss(e.kind)) e.active=false;
         } else if(def.member==&FeatureFlags::navigationHud) {
             mapPointer=-1;
             mapExpanded=false;
@@ -5055,7 +5059,10 @@ static bool pointInAdminCommandButton(float x,float y,float w,float h){
     return x>=x1&&x<=x2&&y>=y1&&y<=y2;
 }
 
-static void requestCommandConsole(){ commandOpenRequested=true; }
+static void requestCommandConsole(){
+    std::lock_guard<std::mutex> lock(commandMutex);
+    commandOpenRequested=true;
+}
 
 static void touch(int pointerId,int action,float x,float y,float w,float h) {
     if(action==ACTION_DOWN || action==ACTION_POINTER_DOWN) {
@@ -5199,9 +5206,16 @@ Java_com_fanmade_dg_MainActivity_00024NativeBridge_save(JNIEnv*,jclass) {
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_fanmade_dg_MainActivity_00024NativeBridge_consumeCommandOpenRequest(JNIEnv*,jclass){
+    std::lock_guard<std::mutex> lock(dg::commandMutex);
     const bool v=dg::commandOpenRequested;
     dg::commandOpenRequested=false;
     return v?JNI_TRUE:JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_fanmade_dg_MainActivity_00024NativeBridge_cancelCommandOpenRequest(JNIEnv*,jclass){
+    std::lock_guard<std::mutex> lock(dg::commandMutex);
+    dg::commandOpenRequested=false;
 }
 
 extern "C" JNIEXPORT void JNICALL
