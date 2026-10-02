@@ -204,6 +204,26 @@ Integrated prototype test loop for the persistent Destroy Gunners-inspired game.
 The prototype now has the core shape of:
 **remote consciousness -> physical body -> localized damage -> abandoned wreck -> salvage -> scarce components -> fabrication -> replacement body -> continued exploration**
 
+### Architecture refactor: first seam
+
+The native game currently remains a single translation unit so shared gameplay
+state and behavior stay unchanged during the migration. The first subsystem
+boundary is now explicit:
+
+```text
+app/src/main/cpp/
+├── native-lib.cpp                 # JNI bridge, shared state, game loop
+└── console/
+    └── command_console.inl       # command parsing, execution, summon updates
+```
+
+`command_console.inl` is intentionally an internal implementation seam: it is
+included by `native-lib.cpp` while the legacy shared state is still being
+replaced with explicit subsystem interfaces. This lets each extraction compile
+independently without changing gameplay behavior. Future passes can convert
+this seam into a real `command_console.cpp` module once the shared state API is
+defined.
+
 Persistent saves for ecosystem state, more species, richer aggregate food-chain interactions, births across multiple generations, ecosystem interaction with world facilities/ruins, richer procedural terrain/biomes, more boss variants, and deeper salvage/component inventories remain later systems.
 
 ## Build / test
