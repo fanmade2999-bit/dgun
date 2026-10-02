@@ -452,7 +452,7 @@ static int ecosystemPopulation=0;
 
 static constexpr int ECO_EVENT_HISTORY=16;
 struct EcoEventRecord {
-    int type=0; // 1 birth, 2 predation, 3 death, 4 scavenging, 5 cycle
+    int type=0; // 1 birth, 2 predation, 3 death, 4 scavenging, 5 cycle, 6 player kill
     int kind=0;
     int chunkX=0;
     int chunkZ=0;
@@ -2197,6 +2197,8 @@ static void drawMinimap(const Mat4& hud,bool expanded) {
 
         if(e.type==2) {
             drawCircle2D(hud,mx,my,5.5f,0.90f,0.25f,0.14f,alpha);
+        } else if(e.type==6) {
+            drawCircle2D(hud,mx,my,5.0f,0.86f,0.62f,0.18f,alpha);
         } else if(e.type==3) {
             drawCircle2D(hud,mx,my,4.0f,0.68f,0.30f,0.20f,alpha);
         } else if(e.type==1) {
@@ -2436,7 +2438,8 @@ static void drawHud() {
                               (ecosystemLastEvent==2)?"HUNT":
                               (ecosystemLastEvent==3)?"DEATH":
                               (ecosystemLastEvent==4)?"FOOD":
-                              (ecosystemLastEvent==5)?"CYCLE":"";
+                              (ecosystemLastEvent==5)?"CYCLE":
+                              (ecosystemLastEvent==6)?"SHOT":"";
         if(eventText[0]) {
             drawText2D(hud,eventText,viewportW*0.63f,viewportH*0.90f,2.05f,
                        0.60f,0.80f,0.68f,0.72f);
@@ -2951,6 +2954,48 @@ static void update(float dt) {
                         circuits+=2;
                     }
                 }
+            }
+        }
+
+        // Wildlife is a real part of the world, so the player's weapon can
+        // intersect it. We choose the nearest actor along the beam rather than
+        // damaging every creature the beam crosses.
+        int hitEco=-1;
+        float nearestEco=LASER_MAX_RANGE+1.0f;
+        for(int i=0;i<MAX_ECO_ACTORS;i++) {
+            if(!ecoActors[i].alive) continue;
+
+            const Vec3 ecoImage={
+                nearestWorldImage(ecoActors[i].x,px),
+                (ecoActors[i].kind==ECO_HUNTER)?0.45f:0.32f,
+                nearestWorldImage(ecoActors[i].z,pz)
+            };
+            const Vec3 toEco=sub(ecoImage,start);
+            const float alongEco=dot(toEco,dir);
+            if(alongEco<=0.0f || alongEco>maxBeamDistance+0.05f ||
+               alongEco>=nearestEco) continue;
+
+            const Vec3 closestEco=add(start,mul(dir,alongEco));
+            const float radius=(ecoActors[i].kind==ECO_HUNTER)?0.72f:0.55f;
+            const Vec3 deltaEco=sub(ecoImage,closestEco);
+            if(dot(deltaEco,deltaEco)<radius*radius) {
+                nearestEco=alongEco;
+                hitEco=i;
+            }
+        }
+
+        if(hitEco>=0) {
+            EcoActor& animal=ecoActors[hitEco];
+            const float damage=(animal.kind==ECO_HUNTER)?20.0f:12.0f;
+            animal.hp-=damage*trace.energy*dt*60.0f;
+            animal.fear=std::min(1.0f,animal.fear+dt*3.0f);
+            animal.alert=std::min(1.0f,animal.alert+dt*2.0f);
+            if(animal.hp<=0.0f) {
+                recordEcoEvent(6,animal.kind,animal.x,animal.z);
+                ecoKillActor(hitEco);
+                ecosystemLastEvent=6;
+                ecosystemLastEventTimer=2.5f;
+                animal.target=-1;
             }
         }
     }
