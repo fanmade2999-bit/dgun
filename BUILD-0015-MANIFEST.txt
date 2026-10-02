@@ -1,0 +1,24 @@
+BUILD: 0015
+APP ID: com.fanmade.dg
+VERSION: 0.1.5
+VERSION CODE: 15
+
+NEW IN THIS BUILD
+- Chunk-level ecosystem population LOD.
+- Distant creatures can become dormant aggregate populations instead of consuming active actor slots.
+- Dormant populations simulate aggregate births/starvation/ecological pressure per chunk.
+- Wildlife near the player is promoted from dormant counts into detailed actors.
+- Detailed actors beyond the active-world radius can be demoted back into chunk population.
+- This separates "world population" from "currently simulated individual actors".
+- Save schema bumped to v2 to persist dormant population counts.
+
+ACTIVE SIMULATION
+- 96 individual actor slots.
+- Nearby creatures receive full hunger/thirst/energy/fear/group/target behavior.
+- Distant populations remain represented by chunk state.
+- Terrain remains deterministic and is not duplicated in saves.
+
+STATUS
+- SOURCE PUSHED TO MAIN
+- MANUS MONITORS COMPILATION
+- NEXT STEP: MANUS COMPILE + EMULATOR QA
