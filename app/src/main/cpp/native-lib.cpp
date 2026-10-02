@@ -157,7 +157,27 @@ struct FeatureFlags {
     bool navigationHud=false;
     bool progressionHud=false;
 };
+
 static FeatureFlags features{};
+
+static void configurePrototypeFeatures() {
+    // Single switchboard for development slices. The current slice deliberately
+    // contains only the player, procedural terrain, camera-range gesture and
+    // jump. Combat, enemies, ecosystem, structures and map/navigation UI stay
+    // compiled in but inert until their systems are brought back as a unit.
+    features=FeatureFlags{};
+    features.terrain=true;
+    features.player=true;
+    features.playerCombat=false;
+    features.worldStructures=false;
+    features.weather=false;
+    features.ecosystem=false;
+    features.enemy=false;
+    features.boss=false;
+    features.wrecks=false;
+    features.navigationHud=false;
+    features.progressionHud=false;
+}
 static constexpr float ECO_DAY_START=0.20f;
 static constexpr float ECO_NIGHT_START=0.78f;
 
@@ -575,6 +595,8 @@ static GLuint compileShader(GLenum type, const char* src) {
 }
 
 static void initGL() {
+    configurePrototypeFeatures();
+
     const char* vs =
         "attribute vec3 aPos;"
         "uniform mat4 uMvp;"
@@ -2617,14 +2639,9 @@ static void drawMinimalHud(const Mat4& hud) {
     const float barW=viewportW*0.28f;
     const float barH=18.0f;
 
-    drawRect2D(hud,pad,pad,pad+barW,pad+barH,0.03f,0.04f,0.05f,0.85f);
-    drawRect2D(hud,pad,pad,pad+barW*std::clamp(playerHp/100.0f,0.0f,1.0f),
-               pad+barH,0.18f,0.78f,0.30f,0.92f);
-    drawText2D(hud,"HP",pad+6.0f,pad+2.0f,3.0f,0.85f,1.0f,0.90f,0.95f);
+    // Combat is disabled in this slice, so keep the HUD focused on
+    // traversal controls rather than exposing HP/targeting that cannot change.
 
-    const float cx=viewportW*0.50f;
-    const float cy=viewportH*0.47f;
-    drawCircle2D(hud,cx,cy,20.0f,0.60f,0.80f,0.90f,0.70f);
 
     const float joyBaseX=viewportW*0.18f;
     const float joyBaseY=viewportH*0.78f;
@@ -2678,13 +2695,12 @@ static void drawHud() {
         glEnable(GL_DEPTH_TEST);
         return;
     }
-    const Mat4 hud=ortho(0,float(viewportW),float(viewportH),0);
-    
-        glDisable(GL_DEPTH_TEST);
-    
-        // Compact minimap stays behind the gameplay HUD. The expanded map is
-        // composited last so it behaves like a real map overlay.
-        if(!mapExpanded) drawMinimap(hud,false);
+    // Full feature HUD. This path is dormant in the current terrain-only
+    // prototype slice, but remains isolated so later systems can be enabled
+    // without changing the render loop.
+    // Compact minimap stays behind the gameplay HUD. The expanded map is
+    // composited last so it behaves like a real map overlay.
+    if(features.navigationHud && !mapExpanded) drawMinimap(hud,false);
     
         const float pad=22.0f;
         const float barW=viewportW*0.28f;
@@ -3150,10 +3166,7 @@ static void beginPlayerDeath() {
     playerGrounded=true;
     jumpRequested=false;
     respawnTimer=2.20f;
-    laserT=0.0f;
-    firePointer=-1;
-    aimPointer=-1;
-    actionPointer=-1;
+    resetPlayerInput();
 }
 
 
@@ -3903,6 +3916,25 @@ static void finishPlayerRespawn() {
     actionPointer=-1;
     actionPointerActive=false;
     jumpRequested=false;
+}
+
+static void resetPlayerInput() {
+    movePointer=-1;
+    aimPointer=-1;
+    firePointer=-1;
+    jumpPointer=-1;
+    cameraPointer=-1;
+    mapPointer=-1;
+    actionPointer=-1;
+    swapPointer=-1;
+    actionPointerActive=false;
+    joyX=0.0f;
+    joyY=0.0f;
+    lastAimX=0.0f;
+    lastAimY=0.0f;
+    lastCameraY=0.0f;
+    jumpRequested=false;
+    laserT=0.0f;
 }
 
 static void updatePlayerSystem(float dt) {
