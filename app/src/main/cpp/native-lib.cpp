@@ -431,15 +431,20 @@ struct EcoActor {
     float thirst=0.0f;
     float alert=0.0f;
     float loyalty=0.5f;
+    float attackCooldown=0.0f;
     float denX=0.0f, denZ=0.0f;
+    int lastPlayerChunkX=0;
+    int lastPlayerChunkZ=0;
     int target=-1;
     int homeChunkX=0;
     int homeChunkZ=0;
     uint32_t seed=0;
 };
 
-static constexpr int MAX_ECO_ACTORS=48;
-static constexpr int INITIAL_ECO_ACTORS=30;
+static constexpr int MAX_ECO_ACTORS=96;
+static constexpr int INITIAL_ECO_ACTORS=48;
+static constexpr float ECO_PLAYER_HEARING_RADIUS=12.0f;
+static constexpr float ECO_WRECK_SCAVENGE_RADIUS=18.0f;
 static EcoActor ecoActors[MAX_ECO_ACTORS]{};
 static float ecosystemClock=0.0f;
 static float ecosystemAccumulator=0.0f;
@@ -462,6 +467,7 @@ static int ecosystemKills=0;
 static int ecosystemLastEvent=0;
 static float ecosystemLastEventTimer=0.0f; // 1=birth, 2=predation, 3=starvation, 4=scavenge
 static int ecosystemCycle=0;
+static float worldNoise=0.0f;
 
 static void recordEcoEvent(int type,int kind,float x,float z) {
     EcoEventRecord& e=ecoEventHistory[ecoEventWrite];
@@ -895,6 +901,7 @@ static void ecoSpawnActor(int slot,int kind,uint32_t seed,float x,float z) {
     a.alert=0.0f;
     a.loyalty=0.35f+float((seed>>17)&63u)/100.0f;
     a.groupId=(kind==ECO_HUNTER)?int((seed>>12)&3u):int((seed>>18)&7u);
+    a.attackCooldown=float((seed>>27)&31u)/31.0f;
     a.age=5.0f+float((seed>>18)&31u);
     a.homeChunkX=chunkCoord(a.x);
     a.homeChunkZ=chunkCoord(a.z);
@@ -1136,6 +1143,7 @@ static void ecoReproduce(int aSlot,int bSlot) {
 static void simulateEcosystemTick(float dt) {
     const int oldCycle=ecosystemCycle;
     ecosystemClock+=dt;
+    worldNoise=std::max(0.0f,worldNoise-dt*0.45f);
     ecosystemCycle=int(std::floor(ecosystemClock/ECO_CYCLE_SECONDS));
     ecosystemLastEventTimer=std::max(0.0f,ecosystemLastEventTimer-dt);
 
@@ -1164,6 +1172,27 @@ static void simulateEcosystemTick(float dt) {
         }
     }
 
+    if(wreck.active) {
+        float pressure=0.0f;
+        for(int i=0;i<MAX_ECO_ACTORS;i++) {
+            const EcoActor& a=ecoActors[i];
+            if(!a.alive || a.kind!=ECO_SCAVENGER) continue;
+            if(ecoDistanceTo(a.x,a.z,wreck.x,wreck.z)<ECO_WRECK_SCAVENGE_RADIUS) {
+                pressure+=0.00055f*dt;
+            }
+        }
+        if(pressure>0.0f) {
+            wreck.salvagePercent=std::max(0.0f,
+                wreck.salvagePercent-pressure*100.0f);
+            for(int p=0;p<PART_COUNT;p++) {
+                if(wreck.parts[p].hp>0.0f) {
+                    wreck.parts[p].hp=std::max(0.0f,
+                        wreck.parts[p].hp-pressure*wreck.parts[p].maxHp);
+                }
+            }
+        }
+    }
+
     if(oldCycle!=ecosystemCycle && ecosystemCycle>0) {
         ecosystemLastEvent=5;
         ecosystemLastEventTimer=2.5f;
@@ -1187,8 +1216,27 @@ static void simulateEcosystemTick(float dt) {
         a.breedCooldown=std::max(0.0f,a.breedCooldown-dt);
         a.fear=std::max(0.0f,a.fear-dt*0.035f);
         a.alert=std::max(0.0f,a.alert-dt*0.020f);
+        a.attackCooldown=std::max(0.0f,a.attackCooldown-dt);
 
         EcoChunkState& currentChunk=ecoChunkAt(a.x,a.z);
+
+        const float playerDx=wrappedDelta(a.x,px);
+        const float playerDz=wrappedDelta(a.z,pz);
+        const float playerDistance=std::sqrt(std::max(0.0001f,
+            playerDx*playerDx+playerDz*playerDz));
+        const bool playerDetected=
+            playerDistance<(ECO_PLAYER_HEARING_RADIUS+worldNoise*7.0f);
+
+        if(playerDetected) {
+            a.lastPlayerChunkX=chunkCoord(px);
+            a.lastPlayerChunkZ=chunkCoord(pz);
+            a.alert=std::min(1.0f,
+                a.alert+dt*(0.18f+worldNoise*0.50f));
+            if(a.kind!=ECO_HUNTER) {
+                a.fear=std::min(1.0f,
+                    a.fear+dt*(0.26f+worldNoise*0.60f));
+            }
+        }
         if(night && currentChunk.shelter>0.68f) {
             a.energy=std::min(1.0f,a.energy+dt*0.014f);
             a.alert=std::max(0.0f,a.alert-dt*0.030f);
@@ -1378,6 +1426,15 @@ static void simulateEcosystemTick(float dt) {
 
         if(!proceduralSolidAt(a.x,nextZ)) a.z=nextZ;
         else a.yaw+=0.70f;
+
+        if(playerDetected && a.kind!=ECO_HUNTER &&
+           (playerDistance<ECO_PLAYER_HEARING_RADIUS || worldNoise>0.28f)) {
+            const float d=std::max(0.001f,playerDistance);
+            moveX=playerDx/d;
+            moveZ=playerDz/d;
+            a.yaw=std::atan2(moveX,-moveZ);
+            a.alert=std::min(1.0f,a.alert+dt*0.20f);
+        }
 
         ecoWrapActor(a);
 
@@ -2627,6 +2684,7 @@ static void storeDestroyedWreck() {
 }
 
 static void beginPlayerDeath() {
+    worldNoise=std::min(1.0f,worldNoise+0.8f);
     storeDestroyedWreck();
 
     // The chassis has physically ceased to be an available body.
@@ -2809,6 +2867,7 @@ static void update(float dt) {
         movePlayer(move.x*speed*dt,move.z*speed*dt);
 
         if(!miniBotMode && firePointer>=0 && heat<0.92f) {
+            worldNoise=std::min(1.0f,worldNoise+dt*3.5f);
             heat=std::min(1.0f,heat+dt*laserHeatRate());
             laserT=0.08f;
         } else {
