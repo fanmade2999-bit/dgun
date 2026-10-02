@@ -5295,8 +5295,7 @@ Java_com_fanmade_dg_MainActivity_00024NativeBridge_getCommandSuggestions(JNIEnv*
     }
     const auto suggestions=dg::commandSuggestions(input);
     std::string joined;
-    for(size_t i=0;i<suggestions.size();i++){if(i)joined.push_back('
-');joined+=suggestions[i];}
+    for(size_t i=0;i<suggestions.size();i++){if(i)joined.push_back('\n');joined+=suggestions[i];}
     return env->NewStringUTF(joined.c_str());
 }
 
