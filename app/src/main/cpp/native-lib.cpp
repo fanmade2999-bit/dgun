@@ -495,7 +495,7 @@ static double lastTime=0.0;
 static std::string savePath;
 static float autosaveTimer=0.0f;
 static constexpr uint32_t SAVE_MAGIC=0x44475356u;
-static constexpr uint32_t SAVE_VERSION=1u;
+static constexpr uint32_t SAVE_VERSION=2u;
 
 static double nowSeconds() {
     static double t=0.0;
